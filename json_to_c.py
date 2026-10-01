@@ -15,12 +15,48 @@ from typing import Any, Iterable, Optional
 
 
 C_KEYWORDS = {
-    "auto", "break", "case", "char", "const", "continue", "default", "do",
-    "double", "else", "enum", "extern", "float", "for", "goto", "if", "int",
-    "long", "register", "return", "short", "signed", "sizeof", "static",
-    "struct", "switch", "typedef", "union", "unsigned", "void", "volatile",
-    "while", "_Alignas", "_Alignof", "_Atomic", "_Bool", "_Complex", "_Generic",
-    "_Imaginary", "_Noreturn", "_Static_assert", "_Thread_local",
+    "auto",
+    "break",
+    "case",
+    "char",
+    "const",
+    "continue",
+    "default",
+    "do",
+    "double",
+    "else",
+    "enum",
+    "extern",
+    "float",
+    "for",
+    "goto",
+    "if",
+    "int",
+    "long",
+    "register",
+    "return",
+    "short",
+    "signed",
+    "sizeof",
+    "static",
+    "struct",
+    "switch",
+    "typedef",
+    "union",
+    "unsigned",
+    "void",
+    "volatile",
+    "while",
+    "_Alignas",
+    "_Alignof",
+    "_Atomic",
+    "_Bool",
+    "_Complex",
+    "_Generic",
+    "_Imaginary",
+    "_Noreturn",
+    "_Static_assert",
+    "_Thread_local",
 }
 
 
@@ -49,7 +85,7 @@ def c_string(value: str) -> str:
     chunks: list[str] = []
     for byte in encoded:
         if byte == 0x22:
-            chunks.append(r'\"')
+            chunks.append(r"\"")
         elif byte == 0x5C:
             chunks.append(r"\\")
         elif byte == 0x0A:
@@ -127,8 +163,10 @@ def node_signature(node: NodeModel) -> tuple[Any, ...]:
     if node.kind == "generic":
         return ("generic",)
     if node.kind == "object":
-        return ("object", tuple((item.json_name, node_signature(item.node))
-                                 for item in node.fields))
+        return (
+            "object",
+            tuple((item.json_name, node_signature(item.node)) for item in node.fields),
+        )
     if node.kind == "array":
         if node.item is not None:
             return ("array", node_signature(node.item))
@@ -138,8 +176,11 @@ def node_signature(node: NodeModel) -> tuple[Any, ...]:
 
 def infer_node(value: Any, path: str, allocator: NameAllocator) -> NodeModel:
     """从一个 JSON 值递归推导 schema。"""
-    if (isinstance(value, int) and not isinstance(value, bool) and
-            not (-(2**63) <= value <= 2**63 - 1)):
+    if (
+        isinstance(value, int)
+        and not isinstance(value, bool)
+        and not (-(2**63) <= value <= 2**63 - 1)
+    ):
         # C 的固定数值类型无法无损承载超出 int64_t 的 JSON 整数，
         # 交给通用 DOM 保留其原始数字文本。
         return NodeModel("generic", path)
@@ -159,16 +200,21 @@ def infer_node(value: Any, path: str, allocator: NameAllocator) -> NodeModel:
                 c_name = f"{base}_{suffix}"
                 suffix += 1
             used_fields.add(c_name)
-            result.fields.append(FieldModel(
-                str(key), c_name,
-                infer_node(child, f"{path}_{c_name}", allocator),
-            ))
+            result.fields.append(
+                FieldModel(
+                    str(key),
+                    c_name,
+                    infer_node(child, f"{path}_{c_name}", allocator),
+                )
+            )
         return result
     if isinstance(value, list):
         if not value:
             return NodeModel("array", path)
-        children = [infer_node(item, f"{path}_item_{index + 1}", allocator)
-                    for index, item in enumerate(value)]
+        children = [
+            infer_node(item, f"{path}_item_{index + 1}", allocator)
+            for index, item in enumerate(value)
+        ]
         if all(item.kind == "object" for item in children):
             grouped: list[NodeModel] = []
             signatures: list[tuple[Any, ...]] = []
@@ -265,7 +311,9 @@ def emit_node_definitions(root: NodeModel) -> list[str]:
                 lines.append("    uint8_t _unused;  // 空对象占位字段")
             else:
                 for item in node.fields:
-                    lines.append(f"    {c_type(item.node)} {item.c_name};  // JSON 字段 {item.json_name!r}")
+                    lines.append(
+                        f"    {c_type(item.node)} {item.c_name};  // JSON 字段 {item.json_name!r}"
+                    )
             lines.append(f"}} {node.type_name};")
             lines.append("")
         elif node.kind == "array":
@@ -277,14 +325,20 @@ def emit_node_definitions(root: NodeModel) -> list[str]:
                 if node.variants:
                     lines.append("typedef enum {")
                     for index, variant in enumerate(node.variants):
-                        lines.append(f"    {node.union_kind_name.upper()}_VARIANT_{index + 1} = {index},")
+                        lines.append(
+                            f"    {node.union_kind_name.upper()}_VARIANT_{index + 1} = {index},"
+                        )
                     lines.append(f"}} {node.union_kind_name};")
                     lines.append("")
                     lines.append("typedef struct {")
-                    lines.append(f"    {node.union_kind_name} kind;  // 当前 union 成员")
+                    lines.append(
+                        f"    {node.union_kind_name} kind;  // 当前 union 成员"
+                    )
                     lines.append("    union {")
                     for index, variant in enumerate(node.variants):
-                        lines.append(f"        {variant.type_name} variant_{index + 1};")
+                        lines.append(
+                            f"        {variant.type_name} variant_{index + 1};"
+                        )
                     lines.append("    } value;")
                     lines.append(f"}} {node.union_item_name};")
                     lines.append("")
@@ -316,8 +370,13 @@ def source_header_comment(file_name: str, overview: str) -> list[str]:
 def emit_header(root: NodeModel, guard: str, overview: str, root_base: str) -> str:
     lines = source_header_comment(root_base + ".h", overview)
     lines += [
-        f"#ifndef {guard}", f"#define {guard}", "", "#include <stdbool.h>",
-        "#include <stddef.h>", "#include <stdint.h>", "",
+        f"#ifndef {guard}",
+        f"#define {guard}",
+        "",
+        "#include <stdbool.h>",
+        "#include <stddef.h>",
+        "#include <stdint.h>",
+        "",
         "typedef enum {",
         "    JSON_VALUE_NULL = 0,",
         "    JSON_VALUE_BOOL,",
@@ -388,11 +447,23 @@ def field_decode_expr(node: NodeModel, source: str, target: str) -> list[str]:
         }[node.scalar or ""]
         return [f"if ({helper}(&{source}, &{target}) != 0) {{", "    goto fail;", "}"]
     if node.kind == "generic":
-        return [f"if (json_value_clone(&{target}, &{source}) != 0) {{", "    goto fail;", "}"]
+        return [
+            f"if (json_value_clone(&{target}, &{source}) != 0) {{",
+            "    goto fail;",
+            "}",
+        ]
     if node.kind == "object":
-        return [f"if (decode_{node.type_name[:-2]}(&{source}, &{target}) != 0) {{", "    goto fail;", "}"]
+        return [
+            f"if (decode_{node.type_name[:-2]}(&{source}, &{target}) != 0) {{",
+            "    goto fail;",
+            "}",
+        ]
     if node.kind == "array":
-        return [f"if (decode_{node.array_type[:-2]}(&{source}, &{target}) != 0) {{", "    goto fail;", "}"]
+        return [
+            f"if (decode_{node.array_type[:-2]}(&{source}, &{target}) != 0) {{",
+            "    goto fail;",
+            "}",
+        ]
     raise ValueError("不支持的字段类型")
 
 
@@ -409,7 +480,7 @@ def field_free_lines(node: NodeModel, target: str) -> list[str]:
 
 
 def emit_generic_helpers() -> list[str]:
-    return r'''/* ---------- 通用 JSON DOM、解析器和写出器 ---------- */
+    return r"""/* ---------- 通用 JSON DOM、解析器和写出器 ---------- */
 typedef struct {
     const char *text;
     size_t length;
@@ -1215,45 +1286,82 @@ static JSON_GENERATED_UNUSED int encode_json_value(const json_value_t *value, js
     return writer_char(writer, value->kind == JSON_VALUE_ARRAY ? ']' : '}') ? 0 : -1;
 }
 
-'''.splitlines()
+""".splitlines()
 
 
 def emit_object_functions(node: NodeModel) -> list[str]:
     """生成一个 object 的 decode/free/encode 函数。"""
     name = node.type_name[:-2]
-    lines = [f"static void free_{name}({node.type_name} *value);",
-             f"static int decode_{name}(const json_value_t *node, {node.type_name} *out);",
-             f"static int encode_{name}(const {node.type_name} *value, json_writer_t *writer);", ""]
-    lines += [f"static void free_{name}({node.type_name} *value)", "{", "    if (value == NULL) {", "        return;", "    }"]
+    lines = [
+        f"static void free_{name}({node.type_name} *value);",
+        f"static int decode_{name}(const json_value_t *node, {node.type_name} *out);",
+        f"static int encode_{name}(const {node.type_name} *value, json_writer_t *writer);",
+        "",
+    ]
+    lines += [
+        f"static void free_{name}({node.type_name} *value)",
+        "{",
+        "    if (value == NULL) {",
+        "        return;",
+        "    }",
+    ]
     for item in node.fields:
         lines += [*field_free_lines(item.node, f"value->{item.c_name}")]
     lines += [f"    memset(value, 0, sizeof(*value));", "}", ""]
-    lines += [f"static int decode_{name}(const json_value_t *node, {node.type_name} *out)", "{"]
+    lines += [
+        f"static int decode_{name}(const json_value_t *node, {node.type_name} *out)",
+        "{",
+    ]
     if node.fields:
         lines.append("    const json_member_t *member = NULL;")
-    lines += ["    if (node == NULL || out == NULL || node->kind != JSON_VALUE_OBJECT) {",
-              "        return -1;", "    }",
-              f"    if (node->as.object.count != {len(node.fields)}U) {{", "        return -1;", "    }",
-              "    memset(out, 0, sizeof(*out));"]
+    lines += [
+        "    if (node == NULL || out == NULL || node->kind != JSON_VALUE_OBJECT) {",
+        "        return -1;",
+        "    }",
+        f"    if (node->as.object.count != {len(node.fields)}U) {{",
+        "        return -1;",
+        "    }",
+        "    memset(out, 0, sizeof(*out));",
+    ]
     for item in node.fields:
-        lines += [f"    member = json_object_get(node, {c_string(item.json_name)});",
-                  "    if (member == NULL) {", "        goto fail;", "    }"]
-        for line in field_decode_expr(item.node, "member->value", f"out->{item.c_name}"):
+        lines += [
+            f"    member = json_object_get(node, {c_string(item.json_name)});",
+            "    if (member == NULL) {",
+            "        goto fail;",
+            "    }",
+        ]
+        for line in field_decode_expr(
+            item.node, "member->value", f"out->{item.c_name}"
+        ):
             lines.append("    " + line if line else line)
     lines += ["    return 0;"]
     if node.fields:
         lines += ["fail:", f"    free_{name}(out);", "    return -1;"]
     lines += ["}", ""]
-    lines += [f"static int encode_{name}(const {node.type_name} *value, json_writer_t *writer)", "{"]
+    lines += [
+        f"static int encode_{name}(const {node.type_name} *value, json_writer_t *writer)",
+        "{",
+    ]
     if node.fields:
         lines.append("    bool first = true;")
-    lines += ["    if (value == NULL || writer == NULL || !writer_char(writer, '{')) {", "        return -1;", "    }"]
+    lines += [
+        "    if (value == NULL || writer == NULL || !writer_char(writer, '{')) {",
+        "        return -1;",
+        "    }",
+    ]
     for item in node.fields:
-        lines += ["    if (!first && !writer_char(writer, ',')) {", "        return -1;", "    }",
-                  "    first = false;",
-                  f"    if (!writer_string(writer, {c_string(item.json_name)}) || !writer_char(writer, ':')) {{",
-                  "        return -1;", "    }"]
-        lines += ["    " + line for line in encode_expr(item.node, f"value->{item.c_name}")]
+        lines += [
+            "    if (!first && !writer_char(writer, ',')) {",
+            "        return -1;",
+            "    }",
+            "    first = false;",
+            f"    if (!writer_string(writer, {c_string(item.json_name)}) || !writer_char(writer, ':')) {{",
+            "        return -1;",
+            "    }",
+        ]
+        lines += [
+            "    " + line for line in encode_expr(item.node, f"value->{item.c_name}")
+        ]
     lines += ["    return writer_char(writer, '}') ? 0 : -1;", "}", ""]
     return lines
 
@@ -1263,67 +1371,157 @@ def encode_expr(node: NodeModel, value: str) -> list[str]:
         if node.scalar == "string":
             return [f"if (!writer_string(writer, {value})) {{", "    return -1;", "}"]
         if node.scalar == "bool":
-            return [f"if (!writer_put(writer, {value} ? \"true\" : \"false\", {value} ? 4U : 5U)) {{",
-                    "    return -1;", "}"]
+            return [
+                f'if (!writer_put(writer, {value} ? "true" : "false", {value} ? 4U : 5U)) {{',
+                "    return -1;",
+                "}",
+            ]
         if node.scalar == "int":
             return [f"if (!writer_int(writer, {value})) {{", "    return -1;", "}"]
         return [f"if (!writer_double(writer, {value})) {{", "    return -1;", "}"]
     if node.kind == "generic":
-        return [f"if (encode_json_value(&{value}, writer) != 0) {{", "    return -1;", "}"]
+        return [
+            f"if (encode_json_value(&{value}, writer) != 0) {{",
+            "    return -1;",
+            "}",
+        ]
     if node.kind == "object":
-        return [f"if (encode_{node.type_name[:-2]}(&{value}, writer) != 0) {{", "    return -1;", "}"]
+        return [
+            f"if (encode_{node.type_name[:-2]}(&{value}, writer) != 0) {{",
+            "    return -1;",
+            "}",
+        ]
     if node.kind == "array":
-        return [f"if (encode_{node.array_type[:-2]}(&{value}, writer) != 0) {{", "    return -1;", "}"]
+        return [
+            f"if (encode_{node.array_type[:-2]}(&{value}, writer) != 0) {{",
+            "    return -1;",
+            "}",
+        ]
     raise ValueError("不支持的编码类型")
 
 
 def emit_array_functions(node: NodeModel) -> list[str]:
     name = node.array_type[:-2]
-    lines = [f"static void free_{name}({node.array_type} *value);",
-             f"static int decode_{name}(const json_value_t *node, {node.array_type} *out);",
-             f"static int encode_{name}(const {node.array_type} *value, json_writer_t *writer);", ""]
+    lines = [
+        f"static void free_{name}({node.array_type} *value);",
+        f"static int decode_{name}(const json_value_t *node, {node.array_type} *out);",
+        f"static int encode_{name}(const {node.array_type} *value, json_writer_t *writer);",
+        "",
+    ]
     item_kind = node.item or (node.variants[0] if node.variants else None)
-    lines += [f"static void free_{name}({node.array_type} *value)", "{",
-              "    if (value == NULL) {", "        return;", "    }"]
+    lines += [
+        f"static void free_{name}({node.array_type} *value)",
+        "{",
+        "    if (value == NULL) {",
+        "        return;",
+        "    }",
+    ]
     if node.item is not None:
         free_item = field_free_lines(node.item, f"value->items[index]")
         if free_item:
-            lines += ["    size_t index = 0U;",
-                      "    for (index = 0U; index < value->count; ++index) {",
-                      *["        " + line for line in free_item], "    }"]
+            lines += [
+                "    size_t index = 0U;",
+                "    for (index = 0U; index < value->count; ++index) {",
+                *["        " + line for line in free_item],
+                "    }",
+            ]
     elif node.variants:
-        lines += ["    size_t index = 0U;",
-                  "    for (index = 0U; index < value->count; ++index) {",
-                  f"        free_{node.union_item_name[:-2]}(&value->items[index]);", "    }"]
+        lines += [
+            "    size_t index = 0U;",
+            "    for (index = 0U; index < value->count; ++index) {",
+            f"        free_{node.union_item_name[:-2]}(&value->items[index]);",
+            "    }",
+        ]
     else:
-        lines += ["    size_t index = 0U;",
-                  "    for (index = 0U; index < value->count; ++index) {",
-                  "        json_value_free(&value->items[index]);", "    }"]
-    lines += ["    free(value->items);", "    value->items = NULL;", "    value->count = 0U;", "}", ""]
-    lines += [f"static int decode_{name}(const json_value_t *node, {node.array_type} *out)", "{",
-              "    size_t index = 0U;", "    if (node == NULL || out == NULL || node->kind != JSON_VALUE_ARRAY) {",
-              "        return -1;", "    }", "    memset(out, 0, sizeof(*out));", "    out->count = node->as.array.count;"]
-    lines += ["    if (out->count == 0U) {", "        return 0;", "    }",
-              "    out->items = calloc(out->count, sizeof(*out->items));", "    if (out->items == NULL) {", "        out->count = 0U;", "        return -1;", "    }"]
+        lines += [
+            "    size_t index = 0U;",
+            "    for (index = 0U; index < value->count; ++index) {",
+            "        json_value_free(&value->items[index]);",
+            "    }",
+        ]
+    lines += [
+        "    free(value->items);",
+        "    value->items = NULL;",
+        "    value->count = 0U;",
+        "}",
+        "",
+    ]
+    lines += [
+        f"static int decode_{name}(const json_value_t *node, {node.array_type} *out)",
+        "{",
+        "    size_t index = 0U;",
+        "    if (node == NULL || out == NULL || node->kind != JSON_VALUE_ARRAY) {",
+        "        return -1;",
+        "    }",
+        "    memset(out, 0, sizeof(*out));",
+        "    out->count = node->as.array.count;",
+    ]
+    lines += [
+        "    if (out->count == 0U) {",
+        "        return 0;",
+        "    }",
+        "    out->items = calloc(out->count, sizeof(*out->items));",
+        "    if (out->items == NULL) {",
+        "        out->count = 0U;",
+        "        return -1;",
+        "    }",
+    ]
     lines += ["    for (index = 0U; index < out->count; ++index) {"]
     if node.item is not None:
-        lines += ["        if (" + array_item_decode_condition(node.item) + ") {", "            goto fail;", "        }"]
+        lines += [
+            "        if (" + array_item_decode_condition(node.item) + ") {",
+            "            goto fail;",
+            "        }",
+        ]
     elif node.variants:
-        lines += [f"        if (decode_{node.union_item_name[:-2]}(&node->as.array.items[index], &out->items[index]) != 0) {{",
-                  "            goto fail;", "        }"]
+        lines += [
+            f"        if (decode_{node.union_item_name[:-2]}(&node->as.array.items[index], &out->items[index]) != 0) {{",
+            "            goto fail;",
+            "        }",
+        ]
     else:
-        lines += ["        if (json_value_clone(&out->items[index], &node->as.array.items[index]) != 0) {",
-                  "            goto fail;", "        }"]
-    lines += ["    }", "    return 0;", "fail:", f"    free_{name}(out);", "    return -1;", "}", ""]
-    lines += [f"static int encode_{name}(const {node.array_type} *value, json_writer_t *writer)", "{",
-              "    size_t index = 0U;", "    if (value == NULL || writer == NULL || !writer_char(writer, '[')) {", "        return -1;", "    }",
-              "    for (index = 0U; index < value->count; ++index) {", "        if (index != 0U && !writer_char(writer, ',')) {", "            return -1;", "        }"]
+        lines += [
+            "        if (json_value_clone(&out->items[index], &node->as.array.items[index]) != 0) {",
+            "            goto fail;",
+            "        }",
+        ]
+    lines += [
+        "    }",
+        "    return 0;",
+        "fail:",
+        f"    free_{name}(out);",
+        "    return -1;",
+        "}",
+        "",
+    ]
+    lines += [
+        f"static int encode_{name}(const {node.array_type} *value, json_writer_t *writer)",
+        "{",
+        "    size_t index = 0U;",
+        "    if (value == NULL || writer == NULL || !writer_char(writer, '[')) {",
+        "        return -1;",
+        "    }",
+        "    for (index = 0U; index < value->count; ++index) {",
+        "        if (index != 0U && !writer_char(writer, ',')) {",
+        "            return -1;",
+        "        }",
+    ]
     if node.item is not None:
-        lines += ["        " + line for line in encode_expr(node.item, "value->items[index]")]
+        lines += [
+            "        " + line for line in encode_expr(node.item, "value->items[index]")
+        ]
     elif node.variants:
-        lines += [f"        if (encode_{node.union_item_name[:-2]}(&value->items[index], writer) != 0) {{", "            return -1;", "        }"]
+        lines += [
+            f"        if (encode_{node.union_item_name[:-2]}(&value->items[index], writer) != 0) {{",
+            "            return -1;",
+            "        }",
+        ]
     else:
-        lines += ["        if (encode_json_value(&value->items[index], writer) != 0) {", "            return -1;", "        }"]
+        lines += [
+            "        if (encode_json_value(&value->items[index], writer) != 0) {",
+            "            return -1;",
+            "        }",
+        ]
     lines += ["    }", "    return writer_char(writer, ']') ? 0 : -1;", "}", ""]
     return lines
 
@@ -1331,8 +1529,12 @@ def emit_array_functions(node: NodeModel) -> list[str]:
 def array_item_decode_condition(node: NodeModel) -> str:
     target = "out->items[index]"
     if node.kind == "scalar":
-        helper = {"string": "json_decode_string", "bool": "json_decode_bool",
-                  "int": "json_decode_int", "double": "json_decode_double"}[node.scalar or ""]
+        helper = {
+            "string": "json_decode_string",
+            "bool": "json_decode_bool",
+            "int": "json_decode_int",
+            "double": "json_decode_double",
+        }[node.scalar or ""]
         return f"{helper}(&node->as.array.items[index], &{target}) != 0"
     if node.kind == "generic":
         return f"json_value_clone(&{target}, &node->as.array.items[index]) != 0"
@@ -1347,25 +1549,63 @@ def emit_union_functions(node: NodeModel) -> list[str]:
     if not node.variants:
         return []
     name = node.union_item_name[:-2]
-    lines = [f"static void free_{name}({node.union_item_name} *value);",
-             f"static int decode_{name}(const json_value_t *node, {node.union_item_name} *out);",
-             f"static int encode_{name}(const {node.union_item_name} *value, json_writer_t *writer);", ""]
-    lines += [f"static void free_{name}({node.union_item_name} *value)", "{", "    if (value == NULL) {", "        return;", "    }", "    switch (value->kind) {"]
+    lines = [
+        f"static void free_{name}({node.union_item_name} *value);",
+        f"static int decode_{name}(const json_value_t *node, {node.union_item_name} *out);",
+        f"static int encode_{name}(const {node.union_item_name} *value, json_writer_t *writer);",
+        "",
+    ]
+    lines += [
+        f"static void free_{name}({node.union_item_name} *value)",
+        "{",
+        "    if (value == NULL) {",
+        "        return;",
+        "    }",
+        "    switch (value->kind) {",
+    ]
     for index, variant in enumerate(node.variants, start=1):
-        lines += [f"    case {node.union_kind_name.upper()}_VARIANT_{index}:",
-                  f"        free_{variant.type_name[:-2]}(&value->value.variant_{index});", "        break;"]
-    lines += ["    default:", "        break;", "    }", "    memset(value, 0, sizeof(*value));", "}", ""]
-    lines += [f"static int decode_{name}(const json_value_t *node, {node.union_item_name} *out)", "{",
-              "    if (node == NULL || out == NULL) {", "        return -1;", "    }", "    memset(out, 0, sizeof(*out));"]
+        lines += [
+            f"    case {node.union_kind_name.upper()}_VARIANT_{index}:",
+            f"        free_{variant.type_name[:-2]}(&value->value.variant_{index});",
+            "        break;",
+        ]
+    lines += [
+        "    default:",
+        "        break;",
+        "    }",
+        "    memset(value, 0, sizeof(*value));",
+        "}",
+        "",
+    ]
+    lines += [
+        f"static int decode_{name}(const json_value_t *node, {node.union_item_name} *out)",
+        "{",
+        "    if (node == NULL || out == NULL) {",
+        "        return -1;",
+        "    }",
+        "    memset(out, 0, sizeof(*out));",
+    ]
     for index, variant in enumerate(node.variants, start=1):
-        lines += [f"    if (decode_{variant.type_name[:-2]}(node, &out->value.variant_{index}) == 0) {{",
-                  f"        out->kind = {node.union_kind_name.upper()}_VARIANT_{index};", "        return 0;", "    }"]
+        lines += [
+            f"    if (decode_{variant.type_name[:-2]}(node, &out->value.variant_{index}) == 0) {{",
+            f"        out->kind = {node.union_kind_name.upper()}_VARIANT_{index};",
+            "        return 0;",
+            "    }",
+        ]
     lines += ["    return -1;", "}", ""]
-    lines += [f"static int encode_{name}(const {node.union_item_name} *value, json_writer_t *writer)", "{",
-              "    if (value == NULL || writer == NULL) {", "        return -1;", "    }", "    switch (value->kind) {"]
+    lines += [
+        f"static int encode_{name}(const {node.union_item_name} *value, json_writer_t *writer)",
+        "{",
+        "    if (value == NULL || writer == NULL) {",
+        "        return -1;",
+        "    }",
+        "    switch (value->kind) {",
+    ]
     for index, variant in enumerate(node.variants, start=1):
-        lines += [f"    case {node.union_kind_name.upper()}_VARIANT_{index}:",
-                  f"        return encode_{variant.type_name[:-2]}(&value->value.variant_{index}, writer);"]
+        lines += [
+            f"    case {node.union_kind_name.upper()}_VARIANT_{index}:",
+            f"        return encode_{variant.type_name[:-2]}(&value->value.variant_{index}, writer);",
+        ]
     lines += ["    default:", "        return -1;", "    }", "}", ""]
     return lines
 
@@ -1395,26 +1635,279 @@ def emit_type_functions(root: NodeModel) -> list[str]:
     return lines
 
 
-def emit_source(root: NodeModel, header_file_name: str, overview: str, root_base: str) -> str:
+def emit_cjson_helpers() -> list[str]:
+    return r"""/* ---------- cJSON conversion helpers ---------- */
+static bool cjson_has_nul_escape(const char *text, size_t length)
+{
+    bool in_string = false;
+    size_t index = 0U;
+    if (text == NULL) {
+        return false;
+    }
+    for (index = 0U; index < length; ++index) {
+        if (!in_string) {
+            if (text[index] == '"') {
+                in_string = true;
+            }
+        } else if (text[index] == '\\') {
+            if (length - index >= 6U && text[index + 1U] == 'u' &&
+                text[index + 2U] == '0' && text[index + 3U] == '0' &&
+                text[index + 4U] == '0' && text[index + 5U] == '0') {
+                return true;
+            }
+            if (index + 1U < length) {
+                index += 1U;
+            }
+        } else if (text[index] == '"') {
+            in_string = false;
+        }
+    }
+    return false;
+}
+
+static bool cjson_number_is_safe(const cJSON *value)
+{
+    if (value == NULL || !cJSON_IsNumber(value) || !isfinite(value->valuedouble)) {
+        return false;
+    }
+    return fabs(value->valuedouble) <= 9007199254740991.0;
+}
+
+static bool cjson_tree_numbers_are_safe(const cJSON *value)
+{
+    const cJSON *child = NULL;
+    if (value == NULL) {
+        return false;
+    }
+    if (cJSON_IsNumber(value)) {
+        return cjson_number_is_safe(value);
+    }
+    if (cJSON_IsArray(value) || cJSON_IsObject(value)) {
+        for (child = value->child; child != NULL; child = child->next) {
+            if (!cjson_tree_numbers_are_safe(child)) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+static int json_value_from_cjson(json_value_t *output, const cJSON *input)
+{
+    const cJSON *child = NULL;
+    size_t index = 0U;
+    int count = 0;
+    char *number_text = NULL;
+    char *number_end = NULL;
+    if (output == NULL || input == NULL) {
+        return -1;
+    }
+    json_value_init(output);
+    if (cJSON_IsNull(input)) {
+        output->kind = JSON_VALUE_NULL;
+        return 0;
+    }
+    if (cJSON_IsBool(input)) {
+        output->kind = JSON_VALUE_BOOL;
+        output->as.boolean = cJSON_IsTrue(input);
+        return 0;
+    }
+    if (cJSON_IsNumber(input)) {
+        if (!cjson_number_is_safe(input)) {
+            goto fail;
+        }
+        output->kind = JSON_VALUE_NUMBER;
+        output->as.number.real = input->valuedouble;
+        number_text = cJSON_PrintUnformatted(input);
+        if (number_text == NULL ||
+            json_copy_string(number_text, &output->as.number.lexeme) != 0) {
+            goto fail;
+        }
+        output->as.number.is_integer =
+            strchr(number_text, '.') == NULL && strchr(number_text, 'e') == NULL &&
+            strchr(number_text, 'E') == NULL;
+        if (output->as.number.is_integer) {
+            long long integer = 0LL;
+            errno = 0;
+            integer = strtoll(number_text, &number_end, 10);
+            if (errno == ERANGE || number_end == number_text || *number_end != '\0') {
+                cJSON_free(number_text);
+                number_text = NULL;
+                goto fail;
+            }
+            output->as.number.integer = (int64_t)integer;
+        }
+        cJSON_free(number_text);
+        return 0;
+    }
+    if (cJSON_IsString(input)) {
+        if (input->valuestring == NULL) {
+            goto fail;
+        }
+        output->kind = JSON_VALUE_STRING;
+        if (json_copy_string(input->valuestring, &output->as.string) != 0) {
+            goto fail;
+        }
+        return 0;
+    }
+    if (cJSON_IsArray(input)) {
+        count = cJSON_GetArraySize(input);
+        if (count < 0) {
+            goto fail;
+        }
+        output->kind = JSON_VALUE_ARRAY;
+        output->as.array.count = 0U;
+        if (count != 0) {
+            output->as.array.items = (json_value_t *)calloc(
+                (size_t)count, sizeof(*output->as.array.items));
+            if (output->as.array.items == NULL) {
+                goto fail;
+            }
+        }
+        for (index = 0U; index < (size_t)count; ++index) {
+            child = cJSON_GetArrayItem(input, (int)index);
+            if (child == NULL ||
+                json_value_from_cjson(&output->as.array.items[index], child) != 0) {
+                goto fail;
+            }
+            output->as.array.count += 1U;
+        }
+        return 0;
+    }
+    if (cJSON_IsObject(input)) {
+        count = cJSON_GetArraySize(input);
+        if (count < 0) {
+            goto fail;
+        }
+        output->kind = JSON_VALUE_OBJECT;
+        output->as.object.count = 0U;
+        if (count != 0) {
+            output->as.object.items = (json_member_t *)calloc(
+                (size_t)count, sizeof(*output->as.object.items));
+            if (output->as.object.items == NULL) {
+                goto fail;
+            }
+        }
+        child = input->child;
+        for (index = 0U; index < (size_t)count; ++index) {
+            if (child == NULL || child->string == NULL ||
+                json_copy_string(child->string,
+                                 &output->as.object.items[index].key) != 0) {
+                goto fail;
+            }
+            output->as.object.count += 1U;
+            if (json_value_from_cjson(&output->as.object.items[index].value, child) != 0) {
+                goto fail;
+            }
+            child = child->next;
+        }
+        if (child != NULL) {
+            goto fail;
+        }
+        return 0;
+    }
+fail:
+    cJSON_free(number_text);
+    json_value_free(output);
+    return -1;
+}
+""".splitlines()
+
+
+def emit_source(
+    root: NodeModel,
+    header_file_name: str,
+    overview: str,
+    root_base: str,
+    backend: str = "builtin",
+    cjson_header: str = "cjson/cJSON.h",
+) -> str:
     lines = source_header_comment(root_base + ".c", overview)
-    lines += [f'#include "{header_file_name}"', "", "#include <errno.h>", "#include <math.h>",
-              "#include <stdio.h>", "#include <stdlib.h>", "#include <string.h>", "",
-              "#if defined(__GNUC__) || defined(__clang__)",
-              "#define JSON_GENERATED_UNUSED __attribute__((unused))",
-              "#else",
-              "#define JSON_GENERATED_UNUSED",
-              "#endif", "#define JSON_GENERATED_OK 0", ""]
+    lines += [
+        f'#include "{header_file_name}"',
+        "",
+        "#include <errno.h>",
+        "#include <math.h>",
+        "#include <stdio.h>",
+        "#include <stdlib.h>",
+        "#include <string.h>",
+        "",
+        "#if defined(__GNUC__) || defined(__clang__)",
+        "#define JSON_GENERATED_UNUSED __attribute__((unused))",
+        "#else",
+        "#define JSON_GENERATED_UNUSED",
+        "#endif",
+        "#define JSON_GENERATED_OK 0",
+        "",
+    ]
+    if backend == "cjson":
+        lines.insert(lines.index("#include <errno.h>"), f"#include <{cjson_header}>")
     lines += emit_generic_helpers()
+    if backend == "cjson":
+        lines += emit_cjson_helpers()
     lines += emit_type_functions(root)
     root_type = c_type(root)
     root_lower = root_base
     root_name = root_type[:-2]
-    lines += [f"int {root_lower}_from_json(const char *json_text, size_t json_length, {root_type} *out_value)", "{",
-              "    json_parser_t parser = {0};", "    json_value_t document;", "    int result = -1;",
-              "    if (json_text == NULL || out_value == NULL) {", "        return -1;", "    }", "    json_value_init(&document);",
-              "    parser.text = json_text;", "    parser.length = json_length;", "    parser.position = 0U;",
-              "    if (!json_parse_value(&parser, &document)) {", "        json_value_free(&document);", "        return -1;", "    }",
-              "    json_skip_space(&parser);", "    if (parser.position != parser.length) {", "        json_value_free(&document);", "        return -1;", "    }"]
+    lines += [
+        f"int {root_lower}_from_json(const char *json_text, size_t json_length, {root_type} *out_value)",
+        "{",
+    ]
+    if backend == "cjson":
+        lines += [
+            "    char *input_copy = NULL;",
+            "    const char *parse_end = NULL;",
+            "    cJSON *cjson_document = NULL;",
+            "    bool parsed_exactly = false;",
+            "    json_value_t document;",
+            "    int result = -1;",
+            "    if (json_text == NULL || out_value == NULL || json_length == SIZE_MAX) {",
+            "        return -1;",
+            "    }",
+            "    if (cjson_has_nul_escape(json_text, json_length)) {",
+            "        return -1;",
+            "    }",
+            "    json_value_init(&document);",
+            "    input_copy = (char *)malloc(json_length + 1U);",
+            "    if (input_copy == NULL) {",
+            "        return -1;",
+            "    }",
+            "    memcpy(input_copy, json_text, json_length);",
+            "    input_copy[json_length] = '\\0';",
+            "    cjson_document = cJSON_ParseWithLengthOpts(input_copy, json_length + 1U,",
+            "                                                &parse_end, 1);",
+            "    parsed_exactly = cjson_document != NULL &&",
+            "                    parse_end == input_copy + json_length;",
+            "    free(input_copy);",
+            "    if (!parsed_exactly || !cjson_tree_numbers_are_safe(cjson_document) ||",
+            "        json_value_from_cjson(&document, cjson_document) != 0) {",
+            "        cJSON_Delete(cjson_document);",
+            "        json_value_free(&document);",
+            "        return -1;",
+            "    }",
+        ]
+    else:
+        lines += [
+            "    json_parser_t parser = {0};",
+            "    json_value_t document;",
+            "    int result = -1;",
+            "    if (json_text == NULL || out_value == NULL) {",
+            "        return -1;",
+            "    }",
+            "    json_value_init(&document);",
+            "    parser.text = json_text;",
+            "    parser.length = json_length;",
+            "    parser.position = 0U;",
+            "    if (!json_parse_value(&parser, &document)) {",
+            "        json_value_free(&document);",
+            "        return -1;",
+            "    }",
+            "    json_skip_space(&parser);",
+            "    if (parser.position != parser.length) {",
+            "        json_value_free(&document);",
+            "        return -1;",
+            "    }",
+        ]
     if root.kind == "object":
         lines += [f"    result = decode_{root_name}(&document, out_value);"]
     elif root.kind == "array":
@@ -1429,11 +1922,37 @@ def emit_source(root: NodeModel, header_file_name: str, overview: str, root_base
         lines += ["    result = json_decode_int(&document, out_value);"]
     else:
         lines += ["    result = json_decode_double(&document, out_value);"]
-    lines += ["    json_value_free(&document);", "    return result;", "}", ""]
-    lines += [f"int {root_lower}_to_json(const {root_type} *value, char *buffer, size_t buffer_size, size_t *written)", "{",
-              "    json_writer_t writer = {0};", "    int result = -1;",
-              "    if (value == NULL || written == NULL || (buffer == NULL && buffer_size != 0U)) {", "        return -1;", "    }",
-              "    writer.buffer = buffer;", "    writer.capacity = buffer_size;"]
+    lines.append("    json_value_free(&document);")
+    if backend == "cjson":
+        lines.append("    cJSON_Delete(cjson_document);")
+    lines += ["    return result;", "}", ""]
+    lines += [
+        f"int {root_lower}_to_json(const {root_type} *value, char *buffer, size_t buffer_size, size_t *written)",
+        "{",
+    ]
+    if backend == "cjson":
+        lines += [
+            "    json_writer_t writer = {0};",
+            "    cJSON *cjson_document = NULL;",
+            "    char *encoded = NULL;",
+            "    char *printed = NULL;",
+            "    size_t encoded_length = 0U;",
+            "    size_t printed_length = 0U;",
+            "    int result = -1;",
+            "    if (value == NULL || written == NULL || (buffer == NULL && buffer_size != 0U)) {",
+            "        return -1;",
+            "    }",
+        ]
+    else:
+        lines += [
+            "    json_writer_t writer = {0};",
+            "    int result = -1;",
+            "    if (value == NULL || written == NULL || (buffer == NULL && buffer_size != 0U)) {",
+            "        return -1;",
+            "    }",
+            "    writer.buffer = buffer;",
+            "    writer.capacity = buffer_size;",
+        ]
     if root.kind == "object":
         lines += [f"    result = encode_{root_name}(value, &writer);"]
     elif root.kind == "array":
@@ -1443,24 +1962,142 @@ def emit_source(root: NodeModel, header_file_name: str, overview: str, root_base
     elif root.scalar == "string":
         lines += ["    result = writer_string(&writer, *value) ? 0 : -1;"]
     elif root.scalar == "bool":
-        lines += ["    result = writer_put(&writer, *value ? \"true\" : \"false\", *value ? 4U : 5U) ? 0 : -1;"]
+        lines += [
+            '    result = writer_put(&writer, *value ? "true" : "false", *value ? 4U : 5U) ? 0 : -1;'
+        ]
     elif root.scalar == "int":
         lines += ["    result = writer_int(&writer, *value) ? 0 : -1;"]
     else:
         lines += ["    result = writer_double(&writer, *value) ? 0 : -1;"]
-    lines += ["    if (writer.failed && buffer != NULL) {", "        *written = writer.required;", "        return -2;", "    }", "    if (result != 0 || writer.failed) {", "        *written = writer.required;", "        return -1;", "    }", "    if (buffer != NULL) {", "        buffer[writer.position] = '\\0';", "    }", "    *written = writer.required;", "    return JSON_GENERATED_OK;", "}", ""]
-    if root.kind in {"object", "array"}:
-        lines += [f"void {root_lower}_free({root_type} *value)", "{", f"    free_{root_name}(value);", "}", ""]
-    elif root.kind == "generic":
-        lines += [f"void {root_lower}_free({root_type} *value)", "{", "    json_value_free(value);", "}", ""]
-    elif root.scalar == "string":
-        lines += [f"void {root_lower}_free({root_type} *value)", "{", "    if (value != NULL) {", "        free(*value);", "        *value = NULL;", "    }", "}", ""]
+    if backend == "cjson":
+        lines += [
+            "    if (result != 0 || writer.failed || writer.required == SIZE_MAX) {",
+            "        return -1;",
+            "    }",
+            "    encoded_length = writer.required;",
+            "    encoded = (char *)malloc(encoded_length + 1U);",
+            "    if (encoded == NULL) {",
+            "        return -1;",
+            "    }",
+            "    writer.buffer = encoded;",
+            "    writer.capacity = encoded_length + 1U;",
+            "    writer.position = 0U;",
+            "    writer.required = 0U;",
+            "    writer.failed = false;",
+        ]
+        if root.kind in {"object", "array"}:
+            lines += [f"    result = encode_{root_name}(value, &writer);"]
+        elif root.kind == "generic":
+            lines += ["    result = encode_json_value(value, &writer);"]
+        elif root.scalar == "string":
+            lines += ["    result = writer_string(&writer, *value) ? 0 : -1;"]
+        elif root.scalar == "bool":
+            lines += [
+                '    result = writer_put(&writer, *value ? "true" : "false", *value ? 4U : 5U) ? 0 : -1;'
+            ]
+        elif root.scalar == "int":
+            lines += ["    result = writer_int(&writer, *value) ? 0 : -1;"]
+        else:
+            lines += ["    result = writer_double(&writer, *value) ? 0 : -1;"]
+        lines += [
+            "    if (result != 0 || writer.failed || writer.required != encoded_length) {",
+            "        free(encoded);",
+            "        return -1;",
+            "    }",
+            "    encoded[encoded_length] = '\\0';",
+            "    cjson_document = cJSON_ParseWithLength(encoded, encoded_length);",
+            "    free(encoded);",
+            "    if (cjson_document == NULL || !cjson_tree_numbers_are_safe(cjson_document)) {",
+            "        cJSON_Delete(cjson_document);",
+            "        return -1;",
+            "    }",
+            "    printed = cJSON_PrintUnformatted(cjson_document);",
+            "    cJSON_Delete(cjson_document);",
+            "    if (printed == NULL) {",
+            "        return -1;",
+            "    }",
+            "    printed_length = strlen(printed);",
+            "    *written = printed_length;",
+            "    if (buffer == NULL) {",
+            "        cJSON_free(printed);",
+            "        return 0;",
+            "    }",
+            "    if (buffer_size <= printed_length) {",
+            "        cJSON_free(printed);",
+            "        return -2;",
+            "    }",
+            "    memcpy(buffer, printed, printed_length + 1U);",
+            "    cJSON_free(printed);",
+            "    return 0;",
+            "}",
+            "",
+        ]
     else:
-        lines += [f"void {root_lower}_free({root_type} *value)", "{", "    (void)value;", "}", ""]
+        lines += [
+            "    if (writer.failed && buffer != NULL) {",
+            "        *written = writer.required;",
+            "        return -2;",
+            "    }",
+            "    if (result != 0 || writer.failed) {",
+            "        *written = writer.required;",
+            "        return -1;",
+            "    }",
+            "    if (buffer != NULL) {",
+            "        buffer[writer.position] = '\\0';",
+            "    }",
+            "    *written = writer.required;",
+            "    return JSON_GENERATED_OK;",
+            "}",
+            "",
+        ]
+    if root.kind in {"object", "array"}:
+        lines += [
+            f"void {root_lower}_free({root_type} *value)",
+            "{",
+            f"    free_{root_name}(value);",
+            "}",
+            "",
+        ]
+    elif root.kind == "generic":
+        lines += [
+            f"void {root_lower}_free({root_type} *value)",
+            "{",
+            "    json_value_free(value);",
+            "}",
+            "",
+        ]
+    elif root.scalar == "string":
+        lines += [
+            f"void {root_lower}_free({root_type} *value)",
+            "{",
+            "    if (value != NULL) {",
+            "        free(*value);",
+            "        *value = NULL;",
+            "    }",
+            "}",
+            "",
+        ]
+    else:
+        lines += [
+            f"void {root_lower}_free({root_type} *value)",
+            "{",
+            "    (void)value;",
+            "}",
+            "",
+        ]
     return "\n".join(lines)
 
 
-def generate(input_value: Any, root_name: str, header_name: str, source_name: str) -> tuple[str, str]:
+def generate(
+    input_value: Any,
+    root_name: str,
+    header_name: str,
+    source_name: str,
+    backend: str = "builtin",
+    cjson_header: str = "cjson/cJSON.h",
+) -> tuple[str, str]:
+    if backend not in {"builtin", "cjson"}:
+        raise ValueError(f"不支持的 JSON 后端: {backend}")
     root_base = type_identifier(root_name)
     allocator = NameAllocator()
     root = infer_node(input_value, root_base, allocator)
@@ -1468,19 +2105,37 @@ def generate(input_value: Any, root_name: str, header_name: str, source_name: st
     guard = re.sub(r"[^A-Za-z0-9]", "_", root_base.upper()) + "_H"
     overview = "由 JSON 示例自动生成的结构体和 JSON 编解码接口。"
     header = emit_header(root, guard, overview, root_base)
-    source = emit_source(root, header_name, overview, root_base)
+    source = emit_source(root, header_name, overview, root_base, backend, cjson_header)
     return header, source
 
 
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="从 JSON 示例生成 C 结构体以及 JSON 编解码 .h/.c 文件。")
+        description="从 JSON 示例生成 C 结构体以及 JSON 编解码 .h/.c 文件。"
+    )
     parser.add_argument("input", type=Path, help="输入 JSON 文件")
-    parser.add_argument("-o", "--output-dir", type=Path, default=Path("."), help="输出目录，默认当前目录")
+    parser.add_argument(
+        "-o",
+        "--output-dir",
+        type=Path,
+        default=Path("."),
+        help="输出目录，默认当前目录",
+    )
     parser.add_argument("--base-name", help="输出文件基础名，默认使用输入文件名")
     parser.add_argument("--root-name", help="根 C 类型/接口名，默认使用 base-name")
     parser.add_argument("--header", type=Path, help="自定义头文件路径")
     parser.add_argument("--source", type=Path, help="自定义源文件路径")
+    parser.add_argument(
+        "--backend",
+        choices=("builtin", "cjson"),
+        default="builtin",
+        help="JSON 实现：内置或 cJSON (默认: builtin)",
+    )
+    parser.add_argument(
+        "--cjson-header",
+        default="cjson/cJSON.h",
+        help="生成的 C 源文件中 cJSON 头文件的 include 路径",
+    )
     return parser.parse_args(argv)
 
 
@@ -1497,7 +2152,14 @@ def main(argv: Optional[list[str]] = None) -> int:
     header_path = args.header or (args.output_dir / f"{base_name}.h")
     source_path = args.source or (args.output_dir / f"{base_name}.c")
     try:
-        header, source = generate(data, root_name, header_path.name, source_path.name)
+        header, source = generate(
+            data,
+            root_name,
+            header_path.name,
+            source_path.name,
+            args.backend,
+            args.cjson_header,
+        )
         header_path.parent.mkdir(parents=True, exist_ok=True)
         source_path.parent.mkdir(parents=True, exist_ok=True)
         header_path.write_text(header, encoding="utf-8")
