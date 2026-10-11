@@ -1,0 +1,371 @@
+{
+	"comment": "数据中心接口演示配置。用法: ./demo_client config/demo_config_example.json",
+	"broker": {
+		"ip": "127.0.0.1",
+		"port": "1883",
+		"my_app": "partnerApp",
+		"target_app": "e9361app",
+		"msg_qid": 6001
+	},
+	"verbose": 1,
+	"device": {
+		"model": "MCCB",
+		"port": "1",
+		"addr": "1",
+		"desc": "智能断路器"
+	},
+	"self_device": {
+		"model": "TTU",
+		"port": "8",
+		"addr": "8",
+		"desc": "用户app"
+	},
+	"default_delay_ms": 200,
+	"sequence": [
+		{
+			"op": "query_version"
+		},
+		{
+			"op": "create_model",
+			"model": "TTU",
+			"points": [
+				{
+					"name": "PhV_phsA",
+					"type": "float",
+					"unit": "V",
+					"deadzone": 1,
+					"ratio": 1,
+					"isReport": 1
+				},
+				{
+					"name": "PhV_phsB",
+					"type": "float",
+					"unit": "V",
+					"deadzone": 1,
+					"ratio": 1,
+					"isReport": 1
+				},
+				{
+					"name": "SWITCH",
+					"type": "bool",
+					"unit": "1",
+					"deadzone": 0,
+					"ratio": 1,
+					"isReport": 1
+				},
+				{
+					"name": "TotW",
+					"type": "float",
+					"unit": "kWh",
+					"deadzone": 0,
+					"ratio": 1,
+					"isReport": 1
+				},
+				{
+					"name": "PTOV_Op_phsA",
+					"type": "bool",
+					"unit": "1",
+					"deadzone": 0,
+					"ratio": 1,
+					"isReport": 1
+				}
+			]
+		},
+		{
+			"op": "query_model",
+			"model": "TTU"
+		},
+		{
+			"op": "register_device",
+			"device_ref": "self_device"
+		},
+		{
+			"op": "get_dev_guid",
+			"device_ref": "device"
+		},
+		{
+			"op": "get_dev_guid",
+			"device_ref": "self_device"
+		},
+		{
+			"op": "read_point",
+			"device_ref": "device",
+			"point": "dev0_YC0"
+		},
+		{
+			"op": "read_point",
+			"device_ref": "device",
+			"point": "dev0_YC1"
+		},
+		{
+			"op": "read_point",
+			"device_ref": "device",
+			"point": "dev0_YC2"
+		},
+		{
+			"op": "read_point",
+			"device_ref": "device",
+			"point": "dev0_DD0"
+		},
+		{
+			"op": "read_point",
+			"device_ref": "device",
+			"point": "dev0_DD1"
+		},
+		{
+			"op": "read_point",
+			"device_ref": "device",
+			"point": "dev0_DD2"
+		},
+		{
+			"op": "read_point",
+			"device_ref": "device",
+			"point": "dev0_YX0"
+		},
+		{
+			"op": "read_point",
+			"device_ref": "device",
+			"point": "dev0_YX1"
+		},
+		{
+			"op": "read_point",
+			"device_ref": "device",
+			"point": "dev0_YX2"
+		},
+		{
+			"op": "read_points_many",
+			"device_ref": "device",
+			"points": [
+				{
+					"name": "dev0_YC0",
+					"type": "Float"
+				},
+				{
+					"name": "dev0_YC1",
+					"type": "Float"
+				},
+				{
+					"name": "Ydev0_C2",
+					"type": "Float"
+				},
+				{
+					"name": "dev0_YX0",
+					"type": "Bool"
+				},
+				{
+					"name": "dev0_YX1",
+					"type": "Bool"
+				},
+				{
+					"name": "dev0_YX2",
+					"type": "Bool"
+				},
+				{
+					"name": "dev0_DD0",
+					"type": "Float"
+				},
+				{
+					"name": "dev0_DD1",
+					"type": "Float"
+				},
+				{
+					"name": "dev0_DD2",
+					"type": "Float"
+				}
+			]
+		},
+		{
+			"op": "report_real_data",
+			"device_ref": "self_device",
+			"quality": "0",
+			"points": [
+				{
+					"name": "PhV_phsA",
+					"val": 220.15
+				},
+				{
+					"name": "PhV_phsB",
+					"val": 219.8
+				}
+			]
+		},
+		{
+			"op": "report_data_change",
+			"device_ref": "self_device",
+			"points": [
+				{
+					"name": "PhV_phsA",
+					"kind": "yc",
+					"val": 220.15,
+					"unit": "V",
+					"id": 1
+				},
+				{
+					"name": "SWITCH",
+					"kind": "yx",
+					"val": 1,
+					"unit": "",
+					"id": 2
+				}
+			]
+		},
+		{
+			"op": "get_parameter",
+			"device_ref": "device",
+			"total": true
+		},
+		{
+			"op": "get_parameter",
+			"device_ref": "device",
+			"names": [
+				"span",
+				"ratio"
+			]
+		},
+		{
+			"op": "set_parameter",
+			"device_ref": "device",
+			"points": [
+				{
+					"name": "span",
+					"val": 5,
+					"datatype": "Int"
+				},
+				{
+					"name": "ratio",
+					"val": 50,
+					"datatype": "Int"
+				}
+			]
+		},
+		{
+			"op": "delete_parameter",
+			"device_ref": "device",
+			"names": [
+				"span"
+			]
+		},
+		{
+			"op": "remote_control",
+			"device_ref": "device",
+			"point": "YK0",
+			"cmd": "1",
+			"token": "yk-0001",
+			"delay_ms": 5000,
+			"dev": "1_1_MCCB"
+		},
+		{
+			"op": "remote_control",
+			"device_ref": "device",
+			"point": "YK1",
+			"cmd": "1",
+			"token": "yk-0001",
+			"delay_ms": 5000,
+			"dev": "1_1_MCCB"
+		},
+		{
+			"op": "remote_adjust",
+			"name": "YT3",
+			"value": "4136",
+			"datatype": "Float",
+			"token": "yt-0001",
+			"delay_ms": 2000
+		},
+		{
+			"op": "report_soe",
+			"device_ref": "self_device",
+			"yx_mode": "PTOV_Op_phsA",
+			"extdata": [
+				{
+					"name": "PhV_phsA",
+					"value": "5000"
+				}
+			]
+		},
+		{
+			"op": "request_soe",
+			"device_ref": "self_device"
+		},
+		{
+			"op": "request_soe_n",
+			"device_ref": "self_device",
+			"yx_mode": "PTOV_Op_phsA"
+		},
+		{
+			"op": "subscribe_event",
+			"names": [
+				"PTOV_Open_Op_phsA",
+				"PTOV_Open_Op_phsB"
+			]
+		},
+        {
+			"op": "report_frozen_data",
+			"device_ref": "device",
+			"start": [
+				2026,
+				8,
+				20,
+				11,
+				11,
+				11,
+				99,
+				1
+			],
+			"end": [
+				2026,
+				8,
+				30,
+				22,
+				22,
+				22,
+				88,
+				2
+			],
+			"time_span": 5,
+			"frozen_type": "min",
+			"names": [
+				"PhV_phsA",
+				"PhV_phsB"
+			]
+		},
+		{
+			"op": "query_history",
+			"device_ref": "device",
+			"start": [
+				2026,
+				8,
+				20,
+				11,
+				11,
+				11,
+				99,
+				1
+			],
+			"end": [
+				2026,
+				8,
+				30,
+				22,
+				22,
+				22,
+				88,
+				2
+			],
+			"time_span": 5,
+			"frozen_type": "min",
+			"names": [
+				"PhV_phsA",
+				"PhV_phsB"
+			]
+		},
+		{
+			"op": "unregister_device",
+			"device_ref": "self_device"
+		},
+		{
+			"op": "delete_model",
+			"device_ref": "self_device",
+			"model": "TTU"
+		}
+	]
+}

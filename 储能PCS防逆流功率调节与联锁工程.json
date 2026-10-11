@@ -1,0 +1,248 @@
+{
+  "schema_version": "1.0",
+  "project_id": "plant-a",
+  "revision": 42,
+  "target": {
+    "device_family": "gateway-x",
+    "min_runtime_version": "1.0.0"
+  },
+  "scan_groups": [
+    {
+      "id": "power-control-100ms",
+      "period_ms": 100,
+      "priority": 20,
+      "max_execution_ms": 20,
+      "bad_quality_policy": "inhibitoutputs"
+    }
+  ],
+  "points": [
+    {
+      "id": "meter.active_power",
+      "direction": "input",
+      "data_type": "float64",
+      "unit": "kW",
+      "protocol_instance": "modbus-1",
+      "address": {
+        "function": 4,
+        "register": 100,
+        "count": 2
+      }
+    },
+    {
+      "id": "pcs.power_setpoint",
+      "direction": "output",
+      "data_type": "float64",
+      "unit": "kW",
+      "protocol_instance": "modbus-1",
+      "address": {
+        "function": 16,
+        "register": 200,
+        "count": 2
+      },
+      "limits": {
+        "min": 0,
+        "max": 500,
+        "max_slew_per_second": 50
+      }
+    },
+    {
+      "id": "pcs.remote_control_enabled",
+      "direction": "input",
+      "data_type": "bool",
+      "unit": "",
+      "protocol_instance": "modbus-1",
+      "address": {
+        "function": 1,
+        "register": 10,
+        "count": 1
+      }
+    }
+  ],
+  "logic": {
+    "nodes": [
+      {
+        "id": "read-power",
+        "type_id": "io.read_point",
+        "type_version": 1,
+        "scan_group": "power-control-100ms",
+        "params": {
+          "point_id": "meter.active_power"
+        }
+      },
+      {
+        "id": "upper-limit",
+        "type_id": "math.constant",
+        "type_version": 1,
+        "scan_group": "power-control-100ms",
+        "params": {
+          "value": 450,
+          "unit": "kW"
+        }
+      },
+      {
+        "id": "over-limit",
+        "type_id": "compare.greater_than",
+        "type_version": 1,
+        "scan_group": "power-control-100ms",
+        "params": {}
+      },
+      {
+        "id": "select-action",
+        "type_id": "control.if",
+        "type_version": 1,
+        "scan_group": "power-control-100ms",
+        "params": {}
+      },
+      {
+        "id": "reduce-power",
+        "type_id": "math.subtract",
+        "type_version": 1,
+        "scan_group": "power-control-100ms",
+        "params": {}
+      },
+      {
+        "id": "clamp-setpoint",
+        "type_id": "math.clamp",
+        "type_version": 1,
+        "scan_group": "power-control-100ms",
+        "params": {
+          "min": 0,
+          "max": 500
+        }
+      },
+      {
+        "id": "request-setpoint",
+        "type_id": "io.request_analog_write",
+        "type_version": 1,
+        "scan_group": "power-control-100ms",
+        "params": {
+          "point_id": "pcs.power_setpoint",
+          "interlock_id": "pcs.remote_control_enabled"
+        }
+      }
+    ],
+    "data_edges": [
+      {
+        "from": [
+          "read-power",
+          "value"
+        ],
+        "to": [
+          "over-limit",
+          "a"
+        ]
+      },
+      {
+        "from": [
+          "upper-limit",
+          "value"
+        ],
+        "to": [
+          "over-limit",
+          "b"
+        ]
+      },
+      {
+        "from": [
+          "read-power",
+          "value"
+        ],
+        "to": [
+          "reduce-power",
+          "a"
+        ]
+      },
+      {
+        "from": [
+          "reduce-power",
+          "result"
+        ],
+        "to": [
+          "clamp-setpoint",
+          "value"
+        ]
+      },
+      {
+        "from": [
+          "clamp-setpoint",
+          "result"
+        ],
+        "to": [
+          "request-setpoint",
+          "value"
+        ]
+      },
+      {
+        "from": [
+          "over-limit",
+          "result"
+        ],
+        "to": [
+          "select-action",
+          "condition"
+        ]
+      }
+    ],
+    "exec_edges": [
+      {
+        "from": [
+          "select-action",
+          "true"
+        ],
+        "to": [
+          "request-setpoint",
+          "exec"
+        ]
+      }
+    ],
+    "entry_nodes": [
+      "select-action"
+    ]
+  },
+  "visual": {
+    "nodes": {
+      "read-power": {
+        "x": 100,
+        "y": 140,
+        "width": 180,
+        "height": 100
+      },
+      "upper-limit": {
+        "x": 100,
+        "y": 280,
+        "width": 180,
+        "height": 100
+      },
+      "over-limit": {
+        "x": 360,
+        "y": 200,
+        "width": 180,
+        "height": 100
+      },
+      "select-action": {
+        "x": 620,
+        "y": 180,
+        "width": 180,
+        "height": 100
+      },
+      "reduce-power": {
+        "x": 860,
+        "y": 280,
+        "width": 180,
+        "height": 100
+      },
+      "clamp-setpoint": {
+        "x": 1100,
+        "y": 280,
+        "width": 180,
+        "height": 100
+      },
+      "request-setpoint": {
+        "x": 1340,
+        "y": 200,
+        "width": 180,
+        "height": 100
+      }
+    }
+  }
+}

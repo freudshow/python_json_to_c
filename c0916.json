@@ -1,0 +1,185 @@
+{
+    "DataItem": [
+        {
+            "RtDBNo": 106,
+            "Ratio": 1.0,
+            "desc": "AGC远方压板投入",
+            "Unit": "",
+            "dead": 1.0,
+            "type": 2
+        },
+        {
+            "RtDBNo": 107,
+            "Ratio": 1.0,
+            "desc": "AVC远方压板投入",
+            "Unit": "",
+            "dead": 1.0,
+            "type": 2
+        },
+        {
+            "RtDBNo": 108,
+            "Ratio": 1.0,
+            "desc": "低压备自投软压板投入",
+            "Unit": "",
+            "dead": 1.0,
+            "type": 2
+        }
+    ],
+    "OnPageKeep": 5,
+    "LoopFreq": 5,
+    "SupHardKey": 1,
+    "SplitRow": 1,
+    "DescWidth": 8,
+    "menu": {
+        "version": 1,
+        "root": {
+            "name": "     主菜单",
+            "passwd": 0,
+            "children": [
+                {
+                    "name": "参数设置与查看",
+                    "passwd": 0,
+                    "children": [
+                        {
+                            "name": "1.通信参数查看",
+                            "passwd": 0,
+                            "children": [
+                                {
+                                    "name": "1.1 以太网查看",
+                                    "action": "show_self_ip",
+                                    "passwd": 0
+                                }
+                            ]
+                        },
+                        {
+                            "name": "2.地址参数查看",
+                            "passwd": 0,
+                            "children": [
+                                {
+                                    "name": "2.1 645地址",
+                                    "action": "show_645_addr",
+                                    "passwd": 0
+                                },
+                                {
+                                    "name": "2.2 modbus地址",
+                                    "action": "show_modbus_addr",
+                                    "passwd": 0
+                                }
+                            ]
+                        },
+                        {
+                            "name": "3.版本号查看",
+                            "action": "show_version",
+                            "passwd": 0
+                        }
+                    ]
+                },
+                {
+                    "name": "实时数据轮显",
+                    "action": "display_rtdb",
+                    "passwd": 0
+                },
+                {
+                    "name": "系统信息与SOE",
+                    "passwd": 0,
+                    "children": [
+                        {
+                            "name": "1.系统信息查看",
+                            "action": "show_system_info",
+                            "passwd": 0
+                        },
+                        {
+                            "name": "2.SOE查看",
+                            "action": "show_soe",
+                            "passwd": 0
+                        },
+                        {
+                            "name": "3.告警信息查看",
+                            "action": "show_warn_info",
+                            "passwd": 0
+                        },
+                        {
+                            "name": "4.动作信息查看",
+                            "action": "show_yk_info",
+                            "passwd": 0
+                        }
+                    ]
+                },
+                {
+                    "name": "软压板投退",
+                    "passwd": 0,
+                    "children": [
+                        {
+                            "name": "1.逆功率调节压板",
+                            "action": "set_reverse_power_plate",
+                            "passwd": 2
+                        },
+                        {
+                            "name": "2.有压合闸压板",
+                            "action": "set_has_voltage_plate",
+                            "passwd": 2
+                        },
+                        {
+                            "name": "3.备自投压板",
+                            "passwd": 0,
+                            "children": [
+                                {
+                                    "name": "3.0双电源压板",
+                                    "action": "show_two_power_plates",
+                                    "passwd": 0
+                                },
+                                {
+                                    "name": "3.1备自投使能",
+                                    "action": "set_bzt_plate",
+                                    "passwd": 2
+                                },
+                                {
+                                    "name": "3.2来电恢复使能",
+                                    "action": "set_bzt_recover_plate",
+                                    "passwd": 2
+                                },
+                                {
+                                    "name": "3.3双电源重合闸",
+                                    "action": "set_two_power_qf1_reclose_plate",
+                                    "passwd": 2
+                                }
+                            ]
+                        },
+                        {
+                            "name": "4.备自投参数查看",
+                            "passwd": 0,
+                            "children": [
+                                {
+                                    "name": "4.1双电源参数",
+                                    "action": "show_two_power_parameters",
+                                    "passwd": 0
+                                },
+                                {
+                                    "name": "4.2经典备自投",
+                                    "action": "show_bzt_parameters",
+                                    "passwd": 0
+                                }
+                            ]
+                        },
+                        {
+                            "name": "5.储能控制压板",
+                            "passwd": 0,
+                            "children": [
+                                {
+                                    "name": "5.1储能控制使能",
+                                    "action": "set_cn_enable_plate",
+                                    "passwd": 2
+                                },
+                                {
+                                    "name": "5.2远方指令模式",
+                                    "action": "set_cn_remote_enable_plate",
+                                    "passwd": 2
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}

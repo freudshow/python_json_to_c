@@ -1,0 +1,221 @@
+{
+  "Schema": "PowerGateway/1.0",
+  "Components": [
+    {
+      "Id": "1d4f6009-abfe-40a7-8b27-3dc2ae02597b",
+      "Kind": "PowerSource",
+      "Name": "10kV\u6BCD\u7EBF",
+      "X": -420,
+      "Y": -240,
+      "Data": {
+        "\u7535\u538B(kV)": 0,
+        "\u9891\u7387(Hz)": 0
+      }
+    },
+    {
+      "Id": "075b14b3-758e-45f4-a052-2239ea06a715",
+      "Kind": "CircuitBreaker",
+      "Name": "\u8FDB\u7EBF\u65AD\u8DEF\u5668 QF0",
+      "X": -300,
+      "Y": -120,
+      "Data": {
+        "\u989D\u5B9A\u7535\u6D41(A)": 0,
+        "\u989D\u5B9A\u7535\u538B(V)": 0,
+        "\u8131\u6263\u65F6\u95F4(ms)": 0
+      }
+    },
+    {
+      "Id": "bd2fd7f7-888c-45ad-9ad5-ae81a87b6f1f",
+      "Kind": "CurrentSensor",
+      "Name": "\u8FDB\u7EBF\u4E92\u611F\u5668 TA1",
+      "X": -300,
+      "Y": 40,
+      "Data": {
+        "\u53D8\u6BD4": 1,
+        "\u91CF\u7A0B(A)": 0
+      }
+    },
+    {
+      "Id": "c3bc9841-3d19-44c8-89a2-b29114da3aea",
+      "Kind": "Meter",
+      "Name": "\u603B\u7535\u80FD\u8868 AP-E1",
+      "X": -60,
+      "Y": 60,
+      "Data": {
+        "\u5730\u5740": 0,
+        "\u500D\u7387": 1,
+        "\u7535\u80FD(kWh)": 0
+      }
+    },
+    {
+      "Id": "10157066-3e93-4a2a-adf3-ff112ae51d07",
+      "Kind": "AndGate",
+      "Name": "\u8FC7\u6D41\u4E0E\u95E8",
+      "X": 100,
+      "Y": -200,
+      "Data": {
+        "\u903B\u8F91": "0"
+      }
+    },
+    {
+      "Id": "840c9858-186f-4f59-ba25-67b3f945d6e8",
+      "Kind": "Timer",
+      "Name": "\u901F\u65AD\u5EF6\u65F6 T1",
+      "X": 240,
+      "Y": -150,
+      "Data": {
+        "\u5EF6\u65F6(s)": 0,
+        "\u5F53\u524D(s)": 0
+      }
+    },
+    {
+      "Id": "cba11b98-81cf-4540-b95f-9f4f027619c5",
+      "Kind": "Alarm",
+      "Name": "\u8DF3\u95F8\u62A5\u8B66 HA1",
+      "X": 400,
+      "Y": -40,
+      "Data": {
+        "\u7C7B\u578B": "\u8FC7\u6D41\u8DF3\u95F8",
+        "\u4F7F\u80FD": true
+      }
+    },
+    {
+      "Id": "d08bae27-acec-43f2-9803-098c28c2381b",
+      "Kind": "HumiditySensor",
+      "Name": "\u73AF\u5883\u6E7F\u5EA6 h1",
+      "X": 160,
+      "Y": 300,
+      "Data": {
+        "\u4E0A\u9650(%)": 80,
+        "\u4E0B\u9650(%)": 10,
+        "\u5730\u5740": 0
+      }
+    },
+    {
+      "Id": "506637f8-e43a-4a1e-a632-bf47478e1cb4",
+      "Kind": "Gateway",
+      "Name": "\u7535\u529B\u7269\u8054\u7F51\u5173 GW-1",
+      "X": -240,
+      "Y": 260,
+      "Data": {
+        "\u5730\u5740": 0,
+        "IP": 0,
+        "\u5468\u671F(ms)": 0
+      }
+    },
+    {
+      "Id": "814a8998-88dd-4efa-88b4-b8c81f7facf5",
+      "Kind": "Indicator",
+      "Name": "\u7F51\u5173\u8FD0\u884C\u6307\u793A",
+      "X": 320,
+      "Y": 220,
+      "Data": {
+        "\u989C\u8272": "\u7EA2"
+      }
+    },
+    {
+      "Id": "8b8b2aaa-d945-418d-a054-dd667b995164",
+      "Kind": "Motor",
+      "Name": "\u98CE\u673A\u7535\u52A8\u673A M2",
+      "X": 40,
+      "Y": -260,
+      "Data": {
+        "\u529F\u7387(kW)": "",
+        "\u8F6C\u901F(rpm)": 0,
+        "\u72B6\u6001": ""
+      }
+    },
+    {
+      "Id": "03a1f7f2-c6f9-423a-b13e-96450c9eecd8",
+      "Kind": "TempSensor",
+      "Name": "\u6E29\u5EA6 t1",
+      "X": 180,
+      "Y": 60,
+      "Data": {
+        "\u4E0A\u9650(\u00B0C)": 80,
+        "\u4E0B\u9650(\u00B0C)": 10,
+        "\u5730\u5740": 0
+      }
+    }
+  ],
+  "Connections": [
+    {
+      "S": "1d4f6009-abfe-40a7-8b27-3dc2ae02597b",
+      "ST": "A",
+      "T": "075b14b3-758e-45f4-a052-2239ea06a715",
+      "TT": "L_in"
+    },
+    {
+      "S": "075b14b3-758e-45f4-a052-2239ea06a715",
+      "ST": "L_out",
+      "T": "bd2fd7f7-888c-45ad-9ad5-ae81a87b6f1f",
+      "TT": "HV"
+    },
+    {
+      "S": "bd2fd7f7-888c-45ad-9ad5-ae81a87b6f1f",
+      "ST": "SIG",
+      "T": "c3bc9841-3d19-44c8-89a2-b29114da3aea",
+      "TT": "I"
+    },
+    {
+      "S": "bd2fd7f7-888c-45ad-9ad5-ae81a87b6f1f",
+      "ST": "SIG",
+      "T": "10157066-3e93-4a2a-adf3-ff112ae51d07",
+      "TT": "IN1"
+    },
+    {
+      "S": "bd2fd7f7-888c-45ad-9ad5-ae81a87b6f1f",
+      "ST": "SIG",
+      "T": "840c9858-186f-4f59-ba25-67b3f945d6e8",
+      "TT": "START"
+    },
+    {
+      "S": "840c9858-186f-4f59-ba25-67b3f945d6e8",
+      "ST": "T",
+      "T": "10157066-3e93-4a2a-adf3-ff112ae51d07",
+      "TT": "IN2"
+    },
+    {
+      "S": "10157066-3e93-4a2a-adf3-ff112ae51d07",
+      "ST": "OUT",
+      "T": "cba11b98-81cf-4540-b95f-9f4f027619c5",
+      "TT": "TRIG"
+    },
+    {
+      "S": "506637f8-e43a-4a1e-a632-bf47478e1cb4",
+      "ST": "AI1",
+      "T": "d08bae27-acec-43f2-9803-098c28c2381b",
+      "TT": "SIG"
+    },
+    {
+      "S": "506637f8-e43a-4a1e-a632-bf47478e1cb4",
+      "ST": "DO0",
+      "T": "814a8998-88dd-4efa-88b4-b8c81f7facf5",
+      "TT": "L"
+    },
+    {
+      "S": "506637f8-e43a-4a1e-a632-bf47478e1cb4",
+      "ST": "DO1",
+      "T": "8b8b2aaa-d945-418d-a054-dd667b995164",
+      "TT": "FT"
+    },
+    {
+      "S": "c3bc9841-3d19-44c8-89a2-b29114da3aea",
+      "ST": "R485",
+      "T": "506637f8-e43a-4a1e-a632-bf47478e1cb4",
+      "TT": "AI2"
+    },
+    {
+      "S": "1d4f6009-abfe-40a7-8b27-3dc2ae02597b",
+      "ST": "485\u002B",
+      "T": "506637f8-e43a-4a1e-a632-bf47478e1cb4",
+      "TT": "AI0"
+    },
+    {
+      "S": "c3bc9841-3d19-44c8-89a2-b29114da3aea",
+      "ST": "I",
+      "T": "03a1f7f2-c6f9-423a-b13e-96450c9eecd8",
+      "TT": "SIG"
+    }
+  ]
+}
