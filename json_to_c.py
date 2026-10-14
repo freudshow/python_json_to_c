@@ -1,7 +1,49 @@
 #!/usr/bin/env python3
-"""根据 JSON 示例生成可独立编译的 C 结构体及 JSON 编解码代码。"""
-
 from __future__ import annotations
+"""
+json_to_c.py - 从 JSON 示例生成 C 结构体和 JSON 编解码代码
+
+整体架构：
+----------
+本程序是一个单文件的 Python 3.7+ 工具，无第三方依赖。它的工作流程分为四个主要阶段：
+
+1. Schema 推导阶段 (infer_node)
+   - 读取输入 JSON，递归分析每个值的类型
+   - 区分标量类型、对象、数组、通用值
+   - 处理异构数组、大整数等特殊情况
+
+2. 名称分配阶段 (assign_names)
+   - 为每个需要在 C 头文件中暴露的类型分配唯一的 C 标识符
+   - 处理命名冲突、C 关键字避让、snake_case 规范化
+
+3. 头文件生成阶段 (emit_header)
+   - 生成通用 JSON DOM 定义 (json_value_t, json_member_t)
+   - 生成类型化结构体定义 (typedef struct ... _t)
+   - 生成公共 API 声明 (from_json, to_json, free)
+
+4. 源文件生成阶段 (emit_source)
+   - 生成通用 JSON 解析器、写出器、内存管理代码
+   - 为每个类型生成 decode/encode/free 函数
+   - 支持两种后端：内置解析器、cJSON 库
+
+核心数据结构：
+--------------
+- NodeModel: 表示推导出的 schema 节点，树状结构
+- FieldModel: 对象字段，包含 JSON 名、C 名、子节点
+- NameAllocator: 确保生成的 C 标识符唯一
+
+关键算法：
+---------
+1. 异构数组处理：检查数组元素签名，相同则用单一 item 类型，
+   不同则生成 union 类型 (kind + union value)
+
+2. 大整数处理：超出 int64_t 范围的整数标记为 generic，
+   保留原始数字文本 (lexeme) 实现无损 round-trip
+
+3. 内存管理：所有动态分配配对 free 函数，错误路径 goto fail 清理
+
+4. 确定性输出：遍历顺序固定，生成的 C 代码顺序可预测，便于 diff
+"""
 
 import argparse
 import datetime as _datetime
@@ -14,96 +56,117 @@ from pathlib import Path
 from typing import Any, Iterable, Optional
 
 
+# =============================================================================
+# C 语言关键字集合（C99/C11），用于避免生成的标识符与关键字冲突
+# =============================================================================
 C_KEYWORDS = {
-    "auto",
-    "break",
-    "case",
-    "char",
-    "const",
-    "continue",
-    "default",
-    "do",
-    "double",
-    "else",
-    "enum",
-    "extern",
-    "float",
-    "for",
-    "goto",
-    "if",
-    "int",
-    "long",
-    "register",
-    "return",
-    "short",
-    "signed",
-    "sizeof",
-    "static",
-    "struct",
-    "switch",
-    "typedef",
-    "union",
-    "unsigned",
-    "void",
-    "volatile",
-    "while",
-    "_Alignas",
-    "_Alignof",
-    "_Atomic",
-    "_Bool",
-    "_Complex",
-    "_Generic",
-    "_Imaginary",
-    "_Noreturn",
-    "_Static_assert",
-    "_Thread_local",
+    "auto", "break", "case", "char", "const", "continue", "default", "do",
+    "double", "else", "enum", "extern", "float", "for", "goto", "if", "int",
+    "long", "register", "return", "short", "signed", "sizeof", "static",
+    "struct", "switch", "typedef", "union", "unsigned", "void", "volatile",
+    "while", "_Alignas", "_Alignof", "_Atomic", "_Bool", "_Complex",
+    "_Generic", "_Imaginary", "_Noreturn", "_Static_assert", "_Thread_local",
 }
 
 
+# =============================================================================
+# 标识符规范化工具函数
+# =============================================================================
 def snake_identifier(value: str, fallback: str = "value") -> str:
-    """把 JSON 名称转换为稳定、合法的 C 标识符。"""
+    """
+    将任意字符串转换为合法的 C 标识符（snake_case）。
+
+    处理步骤：
+    1. 非字母数字下划线替换为下划线
+    2. 连续下划线折叠为单个，去首尾下划线，转小写
+    3. 空结果使用 fallback
+    4. 数字开头加 "field_" 前缀
+    5. C 关键字/Python 关键字加 "_value" 后缀
+
+    参数:
+        value: 原始字符串（如 JSON 字段名）
+        fallback: 结果为空时使用的默认名
+
+    返回:
+        合法的 C 标识符字符串
+    """
+    # 步骤 1: 非法字符替换为下划线
     result = re.sub(r"[^0-9A-Za-z_]", "_", value)
+    # 步骤 2: 折叠连续下划线、去首尾、转小写
     result = re.sub(r"_+", "_", result).strip("_").lower()
+    # 步骤 3: 空字符串处理
     if not result:
         result = fallback
+    # 步骤 4: 数字开头加前缀（C 标识符不能以数字开头）
     if result[0].isdigit():
         result = "field_" + result
+    # 步骤 5: 关键字冲突处理
     if result in C_KEYWORDS or keyword.iskeyword(result):
         result += "_value"
     return result
 
 
 def type_identifier(value: str, fallback: str = "root") -> str:
-    """生成类型/文件使用的基础标识符。"""
+    """
+    生成用于类型名、文件名的基础标识符。
+
+    本质上是 snake_identifier 的封装，语义上区分"类型标识"与"字段标识"。
+    """
     result = snake_identifier(value, fallback)
     return result
 
 
 def c_string(value: str) -> str:
-    """将 Python 字符串转为 UTF-8 C 字符串字面量。"""
+    r"""
+    将 Python 字符串转换为 UTF-8 C 字符串字面量。
+
+    转义规则：
+    - "  -> \"
+    - \  -> \\
+    - 换行/回车/制表符 -> \n \r \t
+    - 可打印 ASCII (0x20-0x7E) 直接输出
+    - 其他字节 -> 三位八进制 \ooo（避免十六进制转义吞噬后续字符）
+
+    参数:
+        value: Python 字符串
+
+    返回:
+        带双引号的 C 字符串字面量，如 "hello\nworld"
+    """
     encoded = value.encode("utf-8")
     chunks: list[str] = []
     for byte in encoded:
-        if byte == 0x22:
+        if byte == 0x22:          # "
             chunks.append(r"\"")
-        elif byte == 0x5C:
+        elif byte == 0x5C:        # \
             chunks.append(r"\\")
-        elif byte == 0x0A:
+        elif byte == 0x0A:        # \n
             chunks.append(r"\n")
-        elif byte == 0x0D:
+        elif byte == 0x0D:        # \r
             chunks.append(r"\r")
-        elif byte == 0x09:
+        elif byte == 0x09:        # \t
             chunks.append(r"\t")
-        elif 0x20 <= byte <= 0x7E:
+        elif 0x20 <= byte <= 0x7E:  # 可打印 ASCII
             chunks.append(chr(byte))
         else:
-            # 使用固定三位八进制转义，避免 C 的十六进制转义吞掉后续字符。
+            # 固定三位八进制，避免 \xHH 吞掉后续十六进制字符
             chunks.append(f"\\{byte:03o}")
     return '"' + "".join(chunks) + '"'
 
 
+# =============================================================================
+# Schema 数据模型
+# =============================================================================
 @dataclass
 class FieldModel:
+    """
+    对象字段模型。
+
+    属性:
+        json_name: JSON 中的原始键名（保留原始大小写、特殊字符，用于编解码时的键匹配）
+        c_name: 转换后的 C 字段名（snake_case，合法标识符）
+        node: 该字段值对应的 schema 节点
+    """
     json_name: str
     c_name: str
     node: "NodeModel"
@@ -111,29 +174,65 @@ class FieldModel:
 
 @dataclass
 class NodeModel:
-    kind: str
-    path: str
-    scalar: Optional[str] = None
-    fields: list[FieldModel] = field(default_factory=list)
-    item: Optional["NodeModel"] = None
-    variants: list["NodeModel"] = field(default_factory=list)
-    type_name: Optional[str] = None
-    array_item_name: Optional[str] = None
-    array_type: Optional[str] = None
-    union_kind_name: Optional[str] = None
-    union_item_name: Optional[str] = None
+    """
+    Schema 树节点，表示推导出的 JSON 类型结构。
+
+    kind 取值:
+        "scalar"  - 标量（bool/int/double/string），scalar 字段记录具体类型
+        "object"  - 对象，fields 列表包含所有字段
+        "array"   - 数组，三种子模式互斥：
+                    - item: 同构数组，所有元素同一类型
+                    - variants: 异构数组，元素为有限种对象类型之一（union）
+                    - 空/通用: item/variants 均为 None，退化为 json_value_t[]
+        "generic" - 通用 JSON 值（null、大整数、无法静态类型化的值），用 json_value_t 表示
+
+    命名字段（由 assign_names 填充）:
+        type_name: 对象类型的 C 类型名（如 fixture_t）
+        array_type: 数组类型的 C 类型名（如 fixture_array_t）
+        array_item_name: 数组元素类型名
+        union_kind_name: union 判别枚举类型名
+        union_item_name: union 容器类型名
+    """
+    kind: str                      # 节点种类
+    path: str                      # 推导时的路径（用于调试/生成唯一基础名）
+    scalar: Optional[str] = None   # 标量子类型："bool" | "int" | "double" | "string"
+    fields: list[FieldModel] = field(default_factory=list)  # 对象字段列表
+    item: Optional["NodeModel"] = None                        # 同构数组元素类型
+    variants: list["NodeModel"] = field(default_factory=list) # 异构数组变体列表
+    type_name: Optional[str] = None          # 对象类型名
+    array_type: Optional[str] = None         # 数组类型名
+    array_item_name: Optional[str] = None    # 数组元素类型名
+    union_kind_name: Optional[str] = None    # union 判别枚举名
+    union_item_name: Optional[str] = None    # union 容器类型名
 
 
+# =============================================================================
+# 名称分配器：确保生成的 C 标识符全局唯一
+# =============================================================================
 class NameAllocator:
-    """避免不同 JSON 名称清洗后产生 C 标识符冲突。"""
+    """
+    避免不同 JSON 名称经 snake_identifier 清洗后产生相同 C 标识符的冲突。
+
+    策略：基础名冲突时追加 _2, _3, ... 后缀。
+    """
 
     def __init__(self) -> None:
-        self.used: set[str] = set()
+        self.used: set[str] = set()  # 已分配的标识符集合
 
     def allocate(self, base: str) -> str:
+        """
+        分配一个唯一标识符。
+
+        参数:
+            base: 基础名（已通过 snake_identifier 规范化）
+
+        返回:
+            唯一的标识符字符串
+        """
         candidate = snake_identifier(base)
         original = candidate
         suffix = 2
+        # 循环直到找到未使用的名字
         while candidate in self.used:
             candidate = f"{original}_{suffix}"
             suffix += 1
@@ -141,15 +240,27 @@ class NameAllocator:
         return candidate
 
 
+# =============================================================================
+# Schema 推导：从 JSON 值递归构建 NodeModel 树
+# =============================================================================
 def scalar_kind(value: Any) -> Optional[str]:
+    """
+    识别 JSON 标量值的具体类型。
+
+    注意：Python bool 是 int 的子类，必须先判断 bool 再判断 int。
+
+    返回:
+        "bool" | "int" | "double" | "string" | None（非标量）
+    """
     if value is None:
-        return None
+        return None  # null -> generic
     if isinstance(value, bool):
         return "bool"
     if isinstance(value, int):
+        # int64_t 范围：-2^63 .. 2^63-1
         if -(2**63) <= value <= 2**63 - 1:
             return "int"
-        return "double"
+        return "double"  # 超大整数用 double 近似（实际会走 generic 保留 lexeme）
     if isinstance(value, float):
         return "double"
     if isinstance(value, str):
@@ -158,11 +269,23 @@ def scalar_kind(value: Any) -> Optional[str]:
 
 
 def node_signature(node: NodeModel) -> tuple[Any, ...]:
+    """
+    计算节点的结构签名，用于判断两个节点是否类型等价。
+
+    签名是一个嵌套元组，完全捕获类型结构，忽略字段名、路径等非类型信息。
+    用于：
+    - 数组同构性检查（所有元素签名相同 -> 单一 item 类型）
+    - 异构数组去重（相同签名的变体合并为一个）
+
+    返回:
+        递归元组签名
+    """
     if node.kind == "scalar":
         return ("scalar", node.scalar)
     if node.kind == "generic":
         return ("generic",)
     if node.kind == "object":
+        # 对象签名：字段名 + 子节点签名（按顺序）
         return (
             "object",
             tuple((item.json_name, node_signature(item.node)) for item in node.fields),
@@ -170,32 +293,56 @@ def node_signature(node: NodeModel) -> tuple[Any, ...]:
     if node.kind == "array":
         if node.item is not None:
             return ("array", node_signature(node.item))
+        # variants 数组：每个变体的签名组成元组
         return ("array", tuple(node_signature(item) for item in node.variants))
     raise ValueError(f"未知节点类型: {node.kind}")
 
 
 def infer_node(value: Any, path: str, allocator: NameAllocator) -> NodeModel:
-    """从一个 JSON 值递归推导 schema。"""
+    """
+    从单个 JSON 值递归推导 schema（核心推导算法）。
+
+    算法要点：
+    1. 大整数（超出 int64_t）标记为 generic，保留原始数字文本
+    2. 标量直接映射 scalar 类型
+    3. null 映射为 generic
+    4. 对象：递归推导每个字段，字段名去重（同名字段取最后一个）
+    5. 数组：
+       - 空数组 -> 通用数组（json_value_t[]）
+       - 全对象元素：按签名分组，单一签名 -> 同构；多签名 -> variants（union）
+       - 非对象元素：签名全同 -> 同构；否则 -> generic 数组（避免 int/double 混合丢精度）
+
+    参数:
+        value: JSON 值（dict/list/str/int/float/bool/None）
+        path: 当前路径字符串（用于生成唯一基础名）
+        allocator: 名称分配器（此处仅用于对象字段名去重）
+
+    返回:
+        根 NodeModel
+    """
+    # 大整数检测：超出 int64_t 无法无损存入 C 固定类型，标记为 generic
     if (
         isinstance(value, int)
         and not isinstance(value, bool)
         and not (-(2**63) <= value <= 2**63 - 1)
     ):
-        # C 的固定数值类型无法无损承载超出 int64_t 的 JSON 整数，
-        # 交给通用 DOM 保留其原始数字文本。
         return NodeModel("generic", path)
+
     kind = scalar_kind(value)
     if kind is not None:
         return NodeModel("scalar", path, scalar=kind)
+
     if value is None:
         return NodeModel("generic", path)
+
     if isinstance(value, dict):
         result = NodeModel("object", path)
-        used_fields: set[str] = set()
+        used_fields: set[str] = set()  # 本对象内字段 C 名去重
         for key, child in value.items():
             base = snake_identifier(str(key), "field")
             c_name = base
             suffix = 2
+            # 同一对象内字段名冲突加后缀
             while c_name in used_fields:
                 c_name = f"{base}_{suffix}"
                 suffix += 1
@@ -208,13 +355,19 @@ def infer_node(value: Any, path: str, allocator: NameAllocator) -> NodeModel:
                 )
             )
         return result
+
     if isinstance(value, list):
         if not value:
+            # 空数组：无法推导元素类型，退化为 generic 数组
             return NodeModel("array", path)
+
+        # 递归推导每个元素
         children = [
             infer_node(item, f"{path}_item_{index + 1}", allocator)
             for index, item in enumerate(value)
         ]
+
+        # 全部为对象元素：尝试按结构分组生成 union
         if all(item.kind == "object" for item in children):
             grouped: list[NodeModel] = []
             signatures: list[tuple[Any, ...]] = []
@@ -224,25 +377,49 @@ def infer_node(value: Any, path: str, allocator: NameAllocator) -> NodeModel:
                     signatures.append(signature)
                     grouped.append(child)
             if len(grouped) == 1:
+                # 所有对象结构相同 -> 同构数组
                 return NodeModel("array", path, item=grouped[0])
+            # 多种结构 -> variants（union 类型）
             return NodeModel("array", path, variants=grouped)
+
+        # 非对象元素或混合：检查签名是否完全一致
         child_signatures = {node_signature(item) for item in children}
         if len(child_signatures) == 1:
             return NodeModel("array", path, item=children[0])
-        # int 和 double 混合时不能统一为 double，否则大整数会丢失精度。
-        # 这类数组交给通用 DOM，并保留每个数字的原始文本。
+
+        # 签名不一致（如 int/double 混合）：不能统一为 double（大整数丢精度）
+        # 退化为 generic 数组，保留每个数字的原始文本
         return NodeModel("array", path)
+
     raise TypeError(f"不支持的 JSON 值: {type(value)!r}")
 
 
+# =============================================================================
+# 名称分配：为每个需要暴露的类型生成 C 类型名
+# =============================================================================
 def assign_names(node: NodeModel, base: str, is_root: bool = False) -> None:
-    """为所有需要暴露到 C 头文件中的类型分配名称。"""
+    """
+    后序遍历 schema 树，为每个复合类型分配 C 类型名。
+
+    命名规则：
+    - 对象: {base}_t
+    - 根数组: {base}_t；非根数组: {base}_array_t
+    - 同构数组元素: 递归分配，base + "_item"
+    - 异构数组变体: base + "_variant_{index}"，并生成 union 相关名字
+    - generic/scalar: 无需命名，直接用内置类型
+
+    参数:
+        node: 当前节点
+        base: 基础名（已规范化）
+        is_root: 是否为根节点（影响数组命名）
+    """
     base = type_identifier(base)
     if node.kind == "object":
         node.type_name = base + "_t"
         for item in node.fields:
             assign_names(item.node, base + "_" + item.c_name)
     elif node.kind == "array":
+        # 根数组用 {base}_t，嵌套数组用 {base}_array_t
         node.array_type = base + "_t" if is_root else base + "_array_t"
         if node.item is not None:
             assign_names(node.item, base + "_item")
@@ -254,21 +431,34 @@ def assign_names(node: NodeModel, base: str, is_root: bool = False) -> None:
             node.union_item_name = base + "_item_t"
             node.array_item_name = node.union_item_name
         else:
+            # 通用数组元素类型
             node.array_item_name = "json_value_t"
     elif node.kind == "generic":
-        return
+        return  # 使用 json_value_t，无需命名
     elif node.kind == "scalar":
-        return
+        return  # 使用内置标量类型，无需命名
 
 
 def c_type(node: NodeModel) -> str:
+    """
+    根据节点类型返回对应的 C 类型字符串（用于结构体字段声明、函数签名等）。
+
+    映射表：
+        object  -> type_name (如 fixture_t)
+        array   -> array_type (如 fixture_array_t)
+        generic -> "json_value_t"
+        string  -> "char *"
+        bool    -> "bool"
+        int     -> "int64_t"
+        double  -> "double"
+    """
     if node.kind == "object":
         if node.type_name is None:
             raise ValueError("对象类型尚未命名")
         return node.type_name
     if node.kind == "array":
         if node.array_type is None:
-            # 仅用于命名阶段的占位；真正生成前会再次计算。
+            # 命名阶段尚未完成时的占位；真正生成前会再次计算
             return "json_value_t"
         return node.array_type
     if node.kind == "generic":
@@ -285,6 +475,11 @@ def c_type(node: NodeModel) -> str:
 
 
 def all_nodes(node: NodeModel) -> Iterable[NodeModel]:
+    """
+    深度优先遍历 schema 树，产出所有节点（用于去重发射定义）。
+
+    产出顺序：先当前节点，再递归子节点（对象字段序、数组 item、variants 序）。
+    """
     yield node
     if node.kind == "object":
         for item in node.fields:
@@ -296,7 +491,19 @@ def all_nodes(node: NodeModel) -> Iterable[NodeModel]:
             yield from all_nodes(variant)
 
 
+# =============================================================================
+# 头文件生成：类型定义与公共 API 声明
+# =============================================================================
 def emit_node_definitions(root: NodeModel) -> list[str]:
+    """
+    生成所有复合类型的 C 定义（typedef struct/enum）。
+
+    使用 id(node) 去重，确保共享子类型只定义一次。
+    产出顺序：依赖先行（先递归子节点，再定义当前节点）。
+
+    返回:
+        C 代码行列表
+    """
     lines: list[str] = []
     emitted: set[int] = set()
 
@@ -304,10 +511,12 @@ def emit_node_definitions(root: NodeModel) -> list[str]:
         if id(node) in emitted:
             return
         if node.kind == "object":
+            # 先发射所有字段类型
             for item in node.fields:
                 emit(item.node)
             lines.append(f"typedef struct {node.type_name} {{")
             if not node.fields:
+                # 空结构体在 C 中非法，加占位字段
                 lines.append("    uint8_t _unused;  // 空对象占位字段")
             else:
                 for item in node.fields:
@@ -323,6 +532,7 @@ def emit_node_definitions(root: NodeModel) -> list[str]:
                 for variant in node.variants:
                     emit(variant)
                 if node.variants:
+                    # 生成 union 判别枚举
                     lines.append("typedef enum {")
                     for index, variant in enumerate(node.variants):
                         lines.append(
@@ -330,6 +540,7 @@ def emit_node_definitions(root: NodeModel) -> list[str]:
                         )
                     lines.append(f"}} {node.union_kind_name};")
                     lines.append("")
+                    # 生成 union 容器结构体
                     lines.append("typedef struct {")
                     lines.append(
                         f"    {node.union_kind_name} kind;  // 当前 union 成员"
@@ -342,6 +553,7 @@ def emit_node_definitions(root: NodeModel) -> list[str]:
                     lines.append("    } value;")
                     lines.append(f"}} {node.union_item_name};")
                     lines.append("")
+            # 生成数组结构体：items 指针 + count
             lines.append("typedef struct {")
             lines.append(f"    {node.array_item_name} *items;  // 数组元素")
             lines.append("    size_t count;  // 元素数量")
@@ -354,6 +566,11 @@ def emit_node_definitions(root: NodeModel) -> list[str]:
 
 
 def source_header_comment(file_name: str, overview: str) -> list[str]:
+    """
+    生成标准文件头注释块。
+
+    包含：文件名、作者、版本、生成日期、概述、修改记录。
+    """
     today = _datetime.date.today().isoformat()
     return [
         "/**",
@@ -368,6 +585,19 @@ def source_header_comment(file_name: str, overview: str) -> list[str]:
 
 
 def emit_header(root: NodeModel, guard: str, overview: str, root_base: str) -> str:
+    """
+    生成完整的 .h 头文件内容。
+
+    结构：
+    1. 文件头注释
+    2. 头文件保护宏
+    3. 标准头文件引用
+    4. 通用 JSON DOM 定义（json_value_t, json_member_t, json_value_kind_t）
+    5. 通用 DOM 内存管理声明（json_value_free）
+    6. 类型化结构体定义（emit_node_definitions）
+    7. 根类型的公共 API 声明：from_json / to_json / free
+    8. 头文件保护尾
+    """
     lines = source_header_comment(root_base + ".h", overview)
     lines += [
         f"#ifndef {guard}",
@@ -377,6 +607,7 @@ def emit_header(root: NodeModel, guard: str, overview: str, root_base: str) -> s
         "#include <stddef.h>",
         "#include <stdint.h>",
         "",
+        # 通用 JSON 值类型枚举
         "typedef enum {",
         "    JSON_VALUE_NULL = 0,",
         "    JSON_VALUE_BOOL,",
@@ -386,9 +617,11 @@ def emit_header(root: NodeModel, guard: str, overview: str, root_base: str) -> s
         "    JSON_VALUE_OBJECT",
         "} json_value_kind_t;",
         "",
+        # 前向声明
         "typedef struct json_value json_value_t;",
         "typedef struct json_member json_member_t;",
         "",
+        # json_value_t：标签联合，支持所有 JSON 类型
         "struct json_value {",
         "    json_value_kind_t kind;",
         "    union {",
@@ -411,6 +644,7 @@ def emit_header(root: NodeModel, guard: str, overview: str, root_base: str) -> s
         "    } as;",
         "};",
         "",
+        # json_member_t：对象成员（键值对）
         "struct json_member {",
         "    char *key;",
         "    json_value_t value;",
@@ -420,9 +654,11 @@ def emit_header(root: NodeModel, guard: str, overview: str, root_base: str) -> s
         "void json_value_free(json_value_t *value);",
         "",
     ]
+    # 类型化结构体定义
     lines += emit_node_definitions(root)
     root_type = c_type(root)
     root_lower = root_base
+    # 公共 API 声明
     lines += [
         f"/** 将 JSON 文本解码为 {root_type}。返回 0 表示成功。 */",
         f"int {root_lower}_from_json(const char *json_text, size_t json_length, {root_type} *out_value);",
@@ -437,7 +673,21 @@ def emit_header(root: NodeModel, guard: str, overview: str, root_base: str) -> s
     return "\n".join(lines)
 
 
+# =============================================================================
+# 字段级编解码代码片段生成
+# =============================================================================
 def field_decode_expr(node: NodeModel, source: str, target: str) -> list[str]:
+    """
+    生成单字段解码代码片段：将 json_value_t 解码为类型化字段。
+
+    参数:
+        node: 字段的 schema 节点
+        source: 源表达式（如 "member->value"）
+        target: 目标表达式（如 "out->field_name"）
+
+    返回:
+        C 代码行列表，使用 goto fail 错误处理模式
+    """
     if node.kind == "scalar":
         helper = {
             "string": "json_decode_string",
@@ -445,29 +695,39 @@ def field_decode_expr(node: NodeModel, source: str, target: str) -> list[str]:
             "int": "json_decode_int",
             "double": "json_decode_double",
         }[node.scalar or ""]
-        return [f"if ({helper}(&{source}, &{target}) != 0) {{", "    goto fail;", "}"]
+        return [
+            f"if ({helper}(&{source}, &{target}) != 0) {{",
+            "    goto fail;",
+            "}"
+        ]
     if node.kind == "generic":
         return [
             f"if (json_value_clone(&{target}, &{source}) != 0) {{",
             "    goto fail;",
-            "}",
+            "}"
         ]
     if node.kind == "object":
         return [
             f"if (decode_{node.type_name[:-2]}(&{source}, &{target}) != 0) {{",
             "    goto fail;",
-            "}",
+            "}"
         ]
     if node.kind == "array":
         return [
             f"if (decode_{node.array_type[:-2]}(&{source}, &{target}) != 0) {{",
             "    goto fail;",
-            "}",
+            "}"
         ]
     raise ValueError("不支持的字段类型")
 
 
 def field_free_lines(node: NodeModel, target: str) -> list[str]:
+    """
+    生成单字段释放代码片段。
+
+    标量 string 需要 free；generic 调用 json_value_free；
+    object/array 调用对应的 free_X 函数；其他标量无需释放。
+    """
     if node.kind == "scalar":
         return [f"free({target});"] if node.scalar == "string" else []
     if node.kind == "generic":
@@ -479,7 +739,29 @@ def field_free_lines(node: NodeModel, target: str) -> list[str]:
     raise ValueError("不支持的字段类型")
 
 
+# =============================================================================
+# 通用 JSON DOM、解析器、写出器（内置后端核心实现）
+# =============================================================================
 def emit_generic_helpers() -> list[str]:
+    """
+    生成内置 JSON 后端的核心运行时代码（约 800 行 C 代码）。
+
+    包含模块：
+    1. json_parser_t / json_writer_t - 解析/写出状态机
+    2. json_value_init / json_value_free - DOM 内存管理
+    3. json_parse_string / _array / _object / _number / _value - 递归下降解析器
+    4. json_object_get - 对象键查找
+    5. json_copy_string / json_value_clone - 深拷贝
+    6. json_decode_* - 从通用 DOM 解码到类型化值
+    7. json_writer_t + writer_put/char/string/int/double - 写出器
+    8. encode_json_value - 通用 DOM 编码为 JSON 文本
+
+    设计特点：
+    - 无递归深度限制（C 栈处理嵌套）
+    - 解析器保留数字原文 - 支持大整数无损 round-trip
+    - 写出器支持两阶段：先计算所需长度，再写入缓冲区（buffer 为 NULL 时仅计算长度）
+    - 所有分配检查返回值，错误路径清理已分配内存
+    """
     return r"""/* ---------- 通用 JSON DOM、解析器和写出器 ---------- */
 typedef struct {
     const char *text;
@@ -1285,19 +1567,29 @@ static JSON_GENERATED_UNUSED int encode_json_value(const json_value_t *value, js
     }
     return writer_char(writer, value->kind == JSON_VALUE_ARRAY ? ']' : '}') ? 0 : -1;
 }
-
 """.splitlines()
 
 
+# =============================================================================
+# 类型化对象/数组/Union 的 encode/decode/free 函数生成
+# =============================================================================
 def emit_object_functions(node: NodeModel) -> list[str]:
-    """生成一个 object 的 decode/free/encode 函数。"""
-    name = node.type_name[:-2]
+    """
+    为单个 object 类型生成三个静态函数：
+    - free_X: 释放对象内部动态内存（字符串、嵌套对象/数组）
+    - decode_X: 从通用 json_value_t 解码为类型化结构体
+    - encode_X: 将类型化结构体编码为 JSON（通过 json_writer_t）
+
+    使用 goto fail 模式处理错误：失败时调用 free_X 清理已分配内存。
+    """
+    name = node.type_name[:-2]  # 去掉 "_t" 后缀得到基础名
     lines = [
         f"static void free_{name}({node.type_name} *value);",
         f"static int decode_{name}(const json_value_t *node, {node.type_name} *out);",
         f"static int encode_{name}(const {node.type_name} *value, json_writer_t *writer);",
         "",
     ]
+    # free 函数
     lines += [
         f"static void free_{name}({node.type_name} *value)",
         "{",
@@ -1308,6 +1600,7 @@ def emit_object_functions(node: NodeModel) -> list[str]:
     for item in node.fields:
         lines += [*field_free_lines(item.node, f"value->{item.c_name}")]
     lines += [f"    memset(value, 0, sizeof(*value));", "}", ""]
+    # decode 函数
     lines += [
         f"static int decode_{name}(const json_value_t *node, {node.type_name} *out)",
         "{",
@@ -1338,6 +1631,7 @@ def emit_object_functions(node: NodeModel) -> list[str]:
     if node.fields:
         lines += ["fail:", f"    free_{name}(out);", "    return -1;"]
     lines += ["}", ""]
+    # encode 函数
     lines += [
         f"static int encode_{name}(const {node.type_name} *value, json_writer_t *writer)",
         "{",
@@ -1367,6 +1661,16 @@ def emit_object_functions(node: NodeModel) -> list[str]:
 
 
 def encode_expr(node: NodeModel, value: str) -> list[str]:
+    """
+    生成表达式编码代码片段：将类型化值写入 json_writer_t。
+
+    参数:
+        node: 值的 schema 节点
+        value: C 表达式字符串（如 "value->field"）
+
+    返回:
+        C 代码行列表
+    """
     if node.kind == "scalar":
         if node.scalar == "string":
             return [f"if (!writer_string(writer, {value})) {{", "    return -1;", "}"]
@@ -1401,7 +1705,15 @@ def encode_expr(node: NodeModel, value: str) -> list[str]:
 
 
 def emit_array_functions(node: NodeModel) -> list[str]:
-    name = node.array_type[:-2]
+    """
+    为数组类型生成 free/decode/encode 函数。
+
+    三种情况：
+    1. 同构数组: item != None，元素类型统一
+    2. 异构数组: variants 非空，元素为 union 类型
+    3. 通用数组: item/variants 均为 None，元素为 json_value_t
+    """
+    name = node.array_type[:-2]  # 去掉 "_t"
     lines = [
         f"static void free_{name}({node.array_type} *value);",
         f"static int decode_{name}(const json_value_t *node, {node.array_type} *out);",
@@ -1446,6 +1758,7 @@ def emit_array_functions(node: NodeModel) -> list[str]:
         "}",
         "",
     ]
+    # decode
     lines += [
         f"static int decode_{name}(const json_value_t *node, {node.array_type} *out)",
         "{",
@@ -1494,6 +1807,7 @@ def emit_array_functions(node: NodeModel) -> list[str]:
         "}",
         "",
     ]
+    # encode
     lines += [
         f"static int encode_{name}(const {node.array_type} *value, json_writer_t *writer)",
         "{",
@@ -1527,6 +1841,11 @@ def emit_array_functions(node: NodeModel) -> list[str]:
 
 
 def array_item_decode_condition(node: NodeModel) -> str:
+    """
+    生成数组元素解码的条件表达式字符串（用于 if 语句中）。
+
+    根据元素类型调用对应的 decode_X 或 json_value_clone。
+    """
     target = "out->items[index]"
     if node.kind == "scalar":
         helper = {
@@ -1546,6 +1865,15 @@ def array_item_decode_condition(node: NodeModel) -> str:
 
 
 def emit_union_functions(node: NodeModel) -> list[str]:
+    """
+    为异构数组的 union 类型生成 free/decode/encode 函数。
+
+    union 结构：
+        typedef enum { KIND_VARIANT_1, KIND_VARIANT_2, ... } kind_t;
+        typedef struct { kind_t kind; union { T1 v1; T2 v2; ... } value; } item_t;
+
+    decode 策略：尝试按变体顺序解码，第一个成功的即为匹配类型。
+    """
     if not node.variants:
         return []
     name = node.union_item_name[:-2]
@@ -1555,6 +1883,7 @@ def emit_union_functions(node: NodeModel) -> list[str]:
         f"static int encode_{name}(const {node.union_item_name} *value, json_writer_t *writer);",
         "",
     ]
+    # free: switch 判别 kind，释放对应变体
     lines += [
         f"static void free_{name}({node.union_item_name} *value)",
         "{",
@@ -1577,6 +1906,7 @@ def emit_union_functions(node: NodeModel) -> list[str]:
         "}",
         "",
     ]
+    # decode: 顺序尝试每个变体的 decode
     lines += [
         f"static int decode_{name}(const json_value_t *node, {node.union_item_name} *out)",
         "{",
@@ -1593,6 +1923,7 @@ def emit_union_functions(node: NodeModel) -> list[str]:
             "    }",
         ]
     lines += ["    return -1;", "}", ""]
+    # encode: switch 判别 kind，调用对应 encode
     lines += [
         f"static int encode_{name}(const {node.union_item_name} *value, json_writer_t *writer)",
         "{",
@@ -1611,6 +1942,11 @@ def emit_union_functions(node: NodeModel) -> list[str]:
 
 
 def emit_type_functions(root: NodeModel) -> list[str]:
+    """
+    遍历 schema 树，收集所有类型的函数定义（按依赖顺序：子类型先于父类型）。
+
+    使用 id(node) 去重，避免共享子类型重复生成。
+    """
     lines: list[str] = []
     emitted: set[int] = set()
 
@@ -1635,7 +1971,23 @@ def emit_type_functions(root: NodeModel) -> list[str]:
     return lines
 
 
+# =============================================================================
+# cJSON 后端辅助代码（可选）
+# =============================================================================
 def emit_cjson_helpers() -> list[str]:
+    """
+    生成 cJSON 后端所需的转换辅助代码。
+
+    功能：
+    1. cjson_has_nul_escape - 检测字符串中是否包含 \u0000（cJSON 不支持）
+    2. cjson_number_is_safe - 检查数值是否在 IEEE 754 安全整数范围内（±2^53-1）
+    3. cjson_tree_numbers_are_safe - 递归检查整棵树数值安全性
+    4. json_value_from_cjson - 将 cJSON 树转换为内部 json_value_t DOM
+
+    限制：
+    - cJSON 用 double 存数字，大整数会丢失精度 -> 拒绝超出安全范围的数字
+    - cJSON 字符串是 NUL 终止 -> 拒绝含 \u0000 的输入
+    """
     return r"""/* ---------- cJSON conversion helpers ---------- */
 static bool cjson_has_nul_escape(const char *text, size_t length)
 {
@@ -1780,7 +2132,7 @@ static int json_value_from_cjson(json_value_t *output, const cJSON *input)
             goto fail;
         }
         output->kind = JSON_VALUE_OBJECT;
-        output->as.object.count = 0U;
+        output->as.object.count = 0U
         if (count != 0) {
             output->as.object.items = (json_member_t *)calloc(
                 (size_t)count, sizeof(*output->as.object.items));
@@ -1814,6 +2166,9 @@ fail:
 """.splitlines()
 
 
+# =============================================================================
+# 源文件生成：组装完整的 .c 文件
+# =============================================================================
 def emit_source(
     root: NodeModel,
     header_file_name: str,
@@ -1822,6 +2177,21 @@ def emit_source(
     backend: str = "builtin",
     cjson_header: str = "cjson/cJSON.h",
 ) -> str:
+    """
+    生成完整的 .c 源文件内容。
+
+    结构：
+    1. 文件头注释
+    2. #include 头文件、标准库头文件
+    3. JSON_GENERATED_UNUSED 宏定义（消除未使用警告）
+    4. 通用 JSON 运行时代码（emit_generic_helpers）
+    5. cJSON 后端辅助代码（如果选择 cJSON）
+    6. 所有类型化函数（emit_type_functions）
+    7. 根类型的公共 API 实现：
+       - {root}_from_json: 解析 JSON -> 通用 DOM -> 类型化结构
+       - {root}_to_json: 类型化结构 -> 写出器 -> JSON 文本（或 cJSON 回写）
+       - {root}_free: 释放类型化结构内存
+    """
     lines = source_header_comment(root_base + ".c", overview)
     lines += [
         f'#include "{header_file_name}"',
@@ -1841,6 +2211,7 @@ def emit_source(
         "",
     ]
     if backend == "cjson":
+        # 在 errno.h 之后插入 cJSON 头文件
         lines.insert(lines.index("#include <errno.h>"), f"#include <{cjson_header}>")
     lines += emit_generic_helpers()
     if backend == "cjson":
@@ -1848,7 +2219,8 @@ def emit_source(
     lines += emit_type_functions(root)
     root_type = c_type(root)
     root_lower = root_base
-    root_name = root_type[:-2]
+    root_name = root_type[:-2]  # 去掉 _t
+    # from_json 实现
     lines += [
         f"int {root_lower}_from_json(const char *json_text, size_t json_length, {root_type} *out_value)",
         "{",
@@ -1887,6 +2259,7 @@ def emit_source(
             "    }",
         ]
     else:
+        # 内置解析器
         lines += [
             "    json_parser_t parser = {0};",
             "    json_value_t document;",
@@ -1908,6 +2281,7 @@ def emit_source(
             "        return -1;",
             "    }",
         ]
+    # 根据根类型分发到对应的 decode 函数
     if root.kind == "object":
         lines += [f"    result = decode_{root_name}(&document, out_value);"]
     elif root.kind == "array":
@@ -1926,6 +2300,7 @@ def emit_source(
     if backend == "cjson":
         lines.append("    cJSON_Delete(cjson_document);")
     lines += ["    return result;", "}", ""]
+    # to_json 实现
     lines += [
         f"int {root_lower}_to_json(const {root_type} *value, char *buffer, size_t buffer_size, size_t *written)",
         "{",
@@ -1953,6 +2328,7 @@ def emit_source(
             "    writer.buffer = buffer;",
             "    writer.capacity = buffer_size;",
         ]
+    # 根类型分发编码
     if root.kind == "object":
         lines += [f"    result = encode_{root_name}(value, &writer);"]
     elif root.kind == "array":
@@ -1970,6 +2346,10 @@ def emit_source(
     else:
         lines += ["    result = writer_double(&writer, *value) ? 0 : -1;"]
     if backend == "cjson":
+        # cJSON 后端：两阶段写出
+        # 1. 先用 writer 计算所需长度（buffer=NULL）
+        # 2. 分配缓冲区，再次写入得到紧凑 JSON
+        # 3. 用 cJSON 解析并重新格式化（保证输出合法、数值安全）
         lines += [
             "    if (result != 0 || writer.failed || writer.required == SIZE_MAX) {",
             "        return -1;",
@@ -2033,6 +2413,7 @@ def emit_source(
             "",
         ]
     else:
+        # 内置后端：writer 已直接写入用户缓冲区
         lines += [
             "    if (writer.failed && buffer != NULL) {",
             "        *written = writer.required;",
@@ -2050,6 +2431,7 @@ def emit_source(
             "}",
             "",
         ]
+    # free 实现
     if root.kind in {"object", "array"}:
         lines += [
             f"void {root_lower}_free({root_type} *value)",
@@ -2078,6 +2460,7 @@ def emit_source(
             "",
         ]
     else:
+        # bool/int/double 无动态内存
         lines += [
             f"void {root_lower}_free({root_type} *value)",
             "{",
@@ -2088,6 +2471,9 @@ def emit_source(
     return "\n".join(lines)
 
 
+# =============================================================================
+# 主生成入口与 CLI
+# =============================================================================
 def generate(
     input_value: Any,
     root_name: str,
@@ -2096,6 +2482,21 @@ def generate(
     backend: str = "builtin",
     cjson_header: str = "cjson/cJSON.h",
 ) -> tuple[str, str]:
+    """
+    完整生成流程入口。
+
+    步骤：
+    1. 校验 backend 参数
+    2. 规范化根名
+    3. 推导 schema (infer_node)
+    4. 分配类型名 (assign_names)
+    5. 生成头文件保护宏
+    6. 生成头文件 (emit_header)
+    7. 生成源文件 (emit_source)
+
+    返回:
+        (header_content, source_content)
+    """
     if backend not in {"builtin", "cjson"}:
         raise ValueError(f"不支持的 JSON 后端: {backend}")
     root_base = type_identifier(root_name)
@@ -2110,6 +2511,18 @@ def generate(
 
 
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
+    """
+    命令行参数解析。
+
+    参数:
+        input: 输入 JSON 文件路径（位置参数）
+        -o/--output-dir: 输出目录（默认当前目录）
+        --base-name: 输出文件基础名（默认输入文件名去扩展名）
+        --root-name: 根类型/接口名（默认 base-name）
+        --header/--source: 自定义输出文件路径
+        --backend: builtin | cJSON（默认 builtin）
+        --cjson-header: cJSON 头文件 include 路径
+    """
     parser = argparse.ArgumentParser(
         description="从 JSON 示例生成 C 结构体以及 JSON 编解码 .h/.c 文件。"
     )
@@ -2140,6 +2553,14 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
 
 
 def main(argv: Optional[list[str]] = None) -> int:
+    """
+    主函数。
+
+    返回码:
+        0: 成功
+        2: JSON 读取/解析失败
+        3: C 代码生成/写入失败
+    """
     args = parse_args(argv)
     try:
         with args.input.open("r", encoding="utf-8") as input_file:
